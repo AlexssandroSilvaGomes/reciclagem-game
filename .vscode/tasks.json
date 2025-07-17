@@ -1,0 +1,27 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Compilar SFML",
+            "type": "shell",
+            "command": "C:\\winlibs-x86_64-posix-seh-gcc-13.1.0-mingw-w64msvcrt-11.0.0-r5\\mingw64\\bin\\g++.exe",
+            "args": [
+                "-g", 
+                "${file}",
+                "-o", 
+                "${fileDirname}\\${fileBasenameNoExtension}.exe",
+                "-I", "C:\\SFML\\include",
+                "-L", "C:\\SFML\\lib",
+                "-lsfml-graphics",
+                "-lsfml-window",
+                "-lsfml-system",
+                "-lsfml-audio"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        }
+    ]
+}
