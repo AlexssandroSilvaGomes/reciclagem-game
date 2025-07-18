@@ -8,6 +8,7 @@
 #include <sstream>
 #include <map>
 #include <algorithm>
+#include <cmath>
 
 using namespace sf;
 using namespace std;
@@ -31,6 +32,7 @@ enum GamePhase {
     MEGACENTER
 };
 
+// --- Waste ---
 class Waste {
 public:
     WasteType type;
@@ -38,17 +40,68 @@ public:
     Vector2f velocity;
     bool active;
 
-    Waste(Texture& texture, WasteType t) : type(t), active(true) {
+    Waste(Texture& texture, WasteType t, int phase = 0) : type(t), active(true) {
         sprite.setTexture(texture);
         sprite.setScale(0.12f, 0.12f);
         sprite.setPosition(rand() % 600, -50);
-        velocity = Vector2f(0, rand() % 3 + 1);
+        // Velocidade ajustada: base 1.5 + 0.4 * fase + aleatório
+        velocity = Vector2f(0, 1.5f + phase * 0.4f + (rand() % 10) * 0.08f);
         sprite.setColor(Color::White);
     }
 
-    void update() {
+    // Retorna true se passou do limite
+    bool update() {
         sprite.move(velocity);
-        if (sprite.getPosition().y > 600) active = false;
+        if (sprite.getPosition().y > 600) {
+            active = false;
+            return true;
+        }
+        return false;
+    }
+};
+
+class PowerUp {
+public:
+    enum Type {
+        COMBO_BOOST,
+        TIME_FREEZE,
+        MAGNET,
+        SHIELD
+    };
+
+    Type type;
+    Sprite sprite;
+    CircleShape glowEffect; // Efeito de brilho ao redor
+    bool active;
+    float lifetime; // Tempo de vida restante
+
+    PowerUp(Texture& texture, Type t) : type(t), active(true), lifetime(10.0f) {
+        sprite.setTexture(texture);
+        sprite.setScale(0.15f, 0.15f);
+        sprite.setPosition(rand() % 600, -50);
+
+        // Configurar o efeito de brilho
+        glowEffect.setRadius(40.0f);
+        glowEffect.setFillColor(Color(255, 255, 255, 100)); // Semi-transparente
+        glowEffect.setOrigin(40.0f, 40.0f);
+        glowEffect.setPosition(sprite.getPosition().x + 20, sprite.getPosition().y + 20);
+    }
+
+    // Atualiza a posição e o efeito de piscar
+    bool update(float deltaTime) {
+        sprite.move(0, 2.0f); // Velocidade fixa
+        glowEffect.setPosition(sprite.getPosition().x + 20, sprite.getPosition().y + 20);
+
+        // Piscar (alternar transparência)
+        int alpha = static_cast<int>(sin(lifetime * 5) * 50 + 150);
+        glowEffect.setFillColor(Color(255, 255, 255, alpha));
+
+        lifetime -= deltaTime;
+        if (lifetime <= 0 || sprite.getPosition().y > 600) {
+            active = false;
+            return true; // Indica que o power-up deve ser removido
+        }
+        return false;
     }
 };
 
@@ -88,7 +141,8 @@ private:
 
     Clock comboClock;
 
-    Waste* selectedWaste;
+    // Troque Waste* selectedWaste por:
+    int selectedWasteIndex = -1;
 
     // Novas variáveis para a tela inicial
     bool inStartScreen = true;
@@ -114,10 +168,16 @@ private:
     Sound victorySound, defeatSound;
     bool inDefeatScreen = false;
 
+    vector<PowerUp> activePowerUps; // Power-ups ativos na tela
+    vector<PowerUp::Type> inventory; // Inventário do jogador (máximo de 2)
+    SoundBuffer powerUpBuffer; // Som ao coletar power-up
+    Sound powerUpSound;
+
 public:
+    // --- No construtor ---
     Game() : window(VideoMode(800, 600), "Gerenciador de Reciclagem"), 
               score(0), reputation(100), phase(0), combo(0), spawnTimer(0), 
-              gameTimer(0), eventTimer(0), specialEvent(false), selectedWaste(nullptr), inStartScreen(true) {
+              gameTimer(0), eventTimer(0), specialEvent(false), selectedWasteIndex(-1), inStartScreen(true) {
         window.setFramerateLimit(60);
         srand(time(0));
 
@@ -327,6 +387,29 @@ public:
         }
     }
 
+    void loadPowerUpTextures() {
+        vector<pair<PowerUp::Type, string>> powerUpFiles = {
+            {PowerUp::COMBO_BOOST, "assets/textures/combo_boost.png"},
+            {PowerUp::TIME_FREEZE, "assets/textures/time_freeze.png"},
+            {PowerUp::MAGNET, "assets/textures/magnet.png"},
+            {PowerUp::SHIELD, "assets/textures/shield.png"}
+        };
+
+        for (const auto& [type, file] : powerUpFiles) {
+            Texture tex;
+            if (!tex.loadFromFile(file)) {
+                cerr << "Erro ao carregar textura do power-up: " << file << endl;
+                continue;
+            }
+            wasteTextures.push_back(tex); // Reutilizando o vetor de texturas
+        }
+
+        if (!powerUpBuffer.loadFromFile("assets/sounds/powerup.wav")) {
+            cerr << "Erro ao carregar som de power-up" << endl;
+        }
+        powerUpSound.setBuffer(powerUpBuffer);
+    }
+
     void setupBins() {
         bins.clear();
         binBounds.clear();
@@ -394,8 +477,15 @@ public:
         } else {
             type = static_cast<WasteType>(rand() % 7);
         }
+        // Passe a fase para ajustar velocidade
+        activeWastes.push_back(Waste(wasteTextures[type], type, phase));
+    }
 
-        activeWastes.push_back(Waste(wasteTextures[type], type));
+    void spawnPowerUp() {
+        if (rand() % 100 < 10) { // 10% de chance de spawnar
+            PowerUp::Type type = static_cast<PowerUp::Type>(rand() % 4);
+            activePowerUps.push_back(PowerUp(wasteTextures[type], type));
+        }
     }
 
     void update() {
@@ -403,22 +493,42 @@ public:
         spawnTimer += deltaTime;
         gameTimer += deltaTime;
 
-        // Atualizar resíduos
+        // Atualizar resíduos e verificar se algum passou do limite
+        int wastesPassed = 0;
         for (auto& waste : activeWastes) {
-            waste.update();
+            if (waste.update()) {
+                wastesPassed++;
+            }
+        }
+
+        // Atualizar power-ups
+        updatePowerUps(deltaTime);
+        
+        if (rand() % 1000 < 5) { // Ajuste a frequência
+            spawnPowerUp();
+        }
+
+        // Penaliza reputação por cada lixo perdido
+        if (wastesPassed > 0) {
+            reputation = max(0, reputation - wastesPassed * 7); // penalidade ajustada
+            combo = 0;
+            sound.setBuffer(wrongBuffer);
+            sound.play();
+            if (reputation <= 0) {
+                bgMusic.pause();
+                defeatSound.play();
+                inDefeatScreen = true;
+            }
         }
 
         // Remover resíduos inativos
-        activeWastes.erase(remove_if(activeWastes.begin(), activeWastes.end(), 
+        activeWastes.erase(remove_if(activeWastes.begin(), activeWastes.end(),
             [&](const Waste& w) {
-                if (!w.active) {
-                    if (selectedWaste == &w) {
-                        selectedWaste = nullptr;
-                    }
-                    return true;
-                }
-                return false;
+                return !w.active;
             }), activeWastes.end());
+        if (selectedWasteIndex >= static_cast<int>(activeWastes.size())) {
+            selectedWasteIndex = -1;
+        }
 
         // Gerar novos resíduos
         float spawnInterval = 2.0f - phase * 0.5f;
@@ -483,57 +593,92 @@ public:
     }
 
     void handleClick(Vector2f mousePos) {
-        if (selectedWaste == nullptr) {
-            for (auto it = activeWastes.begin(); it != activeWastes.end(); ++it) {
-                if (it->sprite.getGlobalBounds().contains(mousePos)) {
-                    selectedWaste = &(*it);
-                    it->sprite.setColor(Color(255, 255, 0));
-                    sound.setBuffer(selectBuffer);      // <-- toque o som de seleção aqui
+        // Se nenhum lixo está selecionado, procura por um para selecionar
+        if (selectedWasteIndex == -1) {
+            for (size_t i = 0; i < activeWastes.size(); ++i) {
+                if (activeWastes[i].sprite.getGlobalBounds().contains(mousePos)) {
+                    selectedWasteIndex = static_cast<int>(i);
+                    activeWastes[i].sprite.setColor(Color(255, 255, 0));
+                    sound.setBuffer(selectBuffer);
                     sound.play();
                     break;
                 }
             }
         }
+        // Se já existe um lixo selecionado
         else {
-            bool correct = false;
-            WasteType selectedType = selectedWaste->type;
-
-            for (const auto& bin : binBounds) {
-                if (bin.second.contains(mousePos)) {
-                    if (bin.first == selectedType) {
-                        correct = true;
+            bool clickedAnotherWaste = false;
+            // Verifica se clicou em outro lixo
+            for (size_t i = 0; i < activeWastes.size(); ++i) {
+                if (activeWastes[i].sprite.getGlobalBounds().contains(mousePos)) {
+                    // Remove destaque do anterior
+                    if (selectedWasteIndex >= 0 && selectedWasteIndex < static_cast<int>(activeWastes.size())) {
+                        activeWastes[selectedWasteIndex].sprite.setColor(Color::White);
                     }
+                    // Seleciona o novo
+                    selectedWasteIndex = static_cast<int>(i);
+                    activeWastes[i].sprite.setColor(Color(255, 255, 0));
+                    sound.setBuffer(selectBuffer);
+                    sound.play();
+                    clickedAnotherWaste = true;
                     break;
                 }
             }
+            // Se não clicou em outro lixo, tenta jogar na lixeira
+            if (!clickedAnotherWaste) {
+                bool correct = false;
+                WasteType selectedType = activeWastes[selectedWasteIndex].type;
 
-            if (correct) {
-                sound.setBuffer(correctBuffer);
-                sound.play();
-                int points = 5 + (combo * 2);
-                score += points;
-                combo++;
-                comboClock.restart();
-                reputation = min(100, reputation + 2);
-            } else {
-                sound.setBuffer(wrongBuffer);
-                sound.play();
-                combo = 0;
-                reputation = max(0, reputation - 10);
-                if (reputation <= 0) {
-                    bgMusic.pause();
-                    defeatSound.play();
-                    inDefeatScreen = true;
+                for (const auto& bin : binBounds) {
+                    if (bin.second.contains(mousePos)) {
+                        if (bin.first == selectedType) {
+                            correct = true;
+                        }
+                        break;
+                    }
                 }
-            }
 
-            auto it = find_if(activeWastes.begin(), activeWastes.end(),
-                [&](const Waste& w) { return &w == selectedWaste; });
-            if (it != activeWastes.end()) {
-                activeWastes.erase(it);
-            }
+                if (correct) {
+                    sound.setBuffer(correctBuffer);
+                    sound.play();
+                    int points = 5 + (combo * 2);
+                    score += points;
+                    combo++;
+                    comboClock.restart();
+                    reputation = min(100, reputation + 2);
+                } else {
+                    sound.setBuffer(wrongBuffer);
+                    sound.play();
+                    combo = 0;
+                    reputation = max(0, reputation - 10);
+                    if (reputation <= 0) {
+                        bgMusic.pause();
+                        defeatSound.play();
+                        inDefeatScreen = true;
+                    }
+                }
 
-            selectedWaste = nullptr;
+                // Remover apenas o item selecionado
+                if (selectedWasteIndex >= 0 && selectedWasteIndex < static_cast<int>(activeWastes.size())) {
+                    activeWastes.erase(activeWastes.begin() + selectedWasteIndex);
+                }
+                selectedWasteIndex = -1;
+            }
+        }
+    }
+
+    void handlePowerUpClick(Vector2f mousePos) {
+        for (size_t i = 0; i < activePowerUps.size(); ++i) {
+            if (activePowerUps[i].sprite.getGlobalBounds().contains(mousePos)) {
+                if (inventory.size() < 2) {
+                    inventory.push_back(activePowerUps[i].type);
+                    powerUpSound.play();
+                    activePowerUps.erase(activePowerUps.begin() + i);
+                } else {
+                    // Inventário cheio, exibir mensagem ou ignorar
+                }
+                break;
+            }
         }
     }
 
@@ -556,19 +701,19 @@ public:
 
     // --- Modifique checkPhaseTransition para mostrar a tela de transição ---
     void checkPhaseTransition() {
-        if (phase == COMMUNITY && score >= 20 && !inLevelTransition) {
+        if (phase == COMMUNITY && score >= 60 && !inLevelTransition) {
             inLevelTransition = true;
             levelInfoText.setString("Fase 1 completa!\nPontuacao: " + to_string(score) +
                                "\nReputacao: " + to_string(reputation) + "%");
             bgMusic.pause();
             victorySound.play();
-        } else if (phase == INDUSTRIAL && score >= 40 && !inLevelTransition) {
+        } else if (phase == INDUSTRIAL && score >= 120 && !inLevelTransition) {
             inLevelTransition = true;
             levelInfoText.setString("Fase 2 completa!\nPontuacao: " + to_string(score) +
                                "\nReputacao: " + to_string(reputation) + "%");
             bgMusic.pause();
             victorySound.play();
-        } else if (phase == MEGACENTER && score >= 60 && !inLevelTransition) {
+        } else if (phase == MEGACENTER && score >= 240 && !inLevelTransition) {
             inLevelTransition = true;
             levelInfoText.setString("Parabens! Jogo completo!\nPontuacao final: " + to_string(score) +
                                "\nReputacao final: " + to_string(reputation) + "%");
@@ -608,12 +753,52 @@ public:
         gameTimer = 0;
         eventTimer = 0;
         specialEvent = false;
-        selectedWaste = nullptr;
+        selectedWasteIndex = -1;
         activeWastes.clear();
         inLevelTransition = false;
         inDefeatScreen = false;
         setupBins();
         updateBackground();
+    }
+
+    void updatePowerUps(float deltaTime) {
+        for (auto& powerUp : activePowerUps) {
+            powerUp.update(deltaTime);
+        }
+
+        // Remover power-ups inativos
+        activePowerUps.erase(remove_if(activePowerUps.begin(), activePowerUps.end(),
+            [](const PowerUp& p) { return !p.active; }), activePowerUps.end());
+    }
+
+    void renderPowerUps() {
+        for (const auto& powerUp : activePowerUps) {
+            window.draw(powerUp.glowEffect);
+            window.draw(powerUp.sprite);
+        }
+    }
+
+    void usePowerUp(PowerUp::Type type) {
+        switch (type) {
+            case PowerUp::COMBO_BOOST:
+                combo *= 3;
+                break;
+            case PowerUp::TIME_FREEZE:
+                for (auto& waste : activeWastes) {
+                    waste.velocity.y = 0;
+                }
+                // Adicione lógica para restaurar a velocidade após 5 segundos
+                break;
+            case PowerUp::MAGNET:
+                for (auto& waste : activeWastes) {
+                    waste.active = false; // Simula coleta automática
+                    score += 5; // Pontuação extra
+                }
+                break;
+            case PowerUp::SHIELD:
+                // Ignore o próximo erro
+                break;
+        }
     }
 
     void run() {
@@ -752,6 +937,8 @@ public:
             if (specialEvent) {
                 window.draw(messageText);
             }
+
+            renderPowerUps(); 
 
             window.display();
         }
