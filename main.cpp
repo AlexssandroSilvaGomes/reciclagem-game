@@ -9,6 +9,8 @@
 #include <map>
 #include <algorithm>
 #include <cmath>
+#include <thread>
+#include <iomanip>
 
 using namespace sf;
 using namespace std;
@@ -29,7 +31,8 @@ enum WasteType {
 enum GamePhase {
     COMMUNITY,
     INDUSTRIAL,
-    MEGACENTER
+    MEGACENTER,
+    BOSS // Nova fase
 };
 
 // --- Waste ---
@@ -39,6 +42,7 @@ public:
     Sprite sprite;
     Vector2f velocity;
     bool active;
+    Color originalColor;
 
     Waste(Texture& texture, WasteType t, int phase = 0) : type(t), active(true) {
         sprite.setTexture(texture);
@@ -47,11 +51,12 @@ public:
         // Velocidade ajustada: base 1.5 + 0.4 * fase + aleatório
         velocity = Vector2f(0, 1.5f + phase * 0.4f + (rand() % 10) * 0.08f);
         sprite.setColor(Color::White);
+        originalColor = Color::White;
     }
 
     // Retorna true se passou do limite
-    bool update() {
-        sprite.move(velocity);
+    bool update(float speedFactor = 1.0f) {
+        sprite.move(velocity * speedFactor);
         if (sprite.getPosition().y > 600) {
             active = false;
             return true;
@@ -66,7 +71,8 @@ public:
         COMBO_BOOST,
         TIME_FREEZE,
         MAGNET,
-        SHIELD
+        SHIELD,
+        BOSS_DAMAGE // Novo power-up para atacar o boss
     };
 
     Type type;
@@ -77,20 +83,25 @@ public:
 
     PowerUp(Texture& texture, Type t) : type(t), active(true), lifetime(10.0f) {
         sprite.setTexture(texture);
-        sprite.setScale(0.15f, 0.15f);
+        sprite.setScale(0.08f, 0.08f); // Reduz o tamanho do power-up
         sprite.setPosition(rand() % 600, -50);
 
         // Configurar o efeito de brilho
-        glowEffect.setRadius(40.0f);
+        glowEffect.setRadius(32.0f);
         glowEffect.setFillColor(Color(255, 255, 255, 100)); // Semi-transparente
-        glowEffect.setOrigin(40.0f, 40.0f);
-        glowEffect.setPosition(sprite.getPosition().x + 20, sprite.getPosition().y + 20);
+        glowEffect.setOrigin(32.0f, 32.0f); // Centraliza o brilho
+        glowEffect.setPosition(sprite.getPosition().x + 25, sprite.getPosition().y + 25);
+
+        // Centralizar o sprite no glowEffect
+        FloatRect spriteBounds = sprite.getLocalBounds();
+        sprite.setOrigin(spriteBounds.width / 2, spriteBounds.height / 2);
+        sprite.setPosition(glowEffect.getPosition());
     }
 
     // Atualiza a posição e o efeito de piscar
     bool update(float deltaTime) {
         sprite.move(0, 2.0f); // Velocidade fixa
-        glowEffect.setPosition(sprite.getPosition().x + 20, sprite.getPosition().y + 20);
+        glowEffect.move(0, 2.0f);
 
         // Piscar (alternar transparência)
         int alpha = static_cast<int>(sin(lifetime * 5) * 50 + 150);
@@ -120,6 +131,8 @@ private:
     Text phaseText;
     Text messageText;
     Text reputationText;
+    Text comboText;
+    Text comboMultiplierText;
 
     RectangleShape reputationBar;
     RectangleShape reputationBarBack;
@@ -140,6 +153,7 @@ private:
     Sound sound;
 
     Clock comboClock;
+    Clock powerUpClock;
 
     // Troque Waste* selectedWaste por:
     int selectedWasteIndex = -1;
@@ -157,7 +171,7 @@ private:
     bool soundMuted = false;
 
     // --- Adicione estas variáveis na sua classe Game ---
-    Texture bgCommunity, bgIndustrial, bgMegacenter;
+    Texture bgCommunity, bgIndustrial, bgMegacenter, bgBoss;
     Sprite bgSprite;
     bool inLevelTransition = false;
     RectangleShape continueButton;
@@ -173,11 +187,45 @@ private:
     SoundBuffer powerUpBuffer; // Som ao coletar power-up
     Sound powerUpSound;
 
+    vector<Texture> powerUpTextures; // Texturas exclusivas para power-ups
+    float powerUpSpawnTimer; // Timer para spawn de power-ups
+
+    // Efeitos de power-up ativos
+    float timeFreezeFactor;
+    float timeFreezeDuration;
+    int shieldCount;
+    float comboBoostMultiplier;
+    float comboBoostDuration;
+    bool magnetActive;
+    float magnetDuration;
+
+    // Visualização de power-ups ativos
+    vector<Sprite> activePowerUpIcons;
+    vector<RectangleShape> activePowerUpTimers;
+    vector<Text> activePowerUpCounts;
+
+    // Novas variáveis para o texto de feedback de power-ups
+    float powerUpTextTimer = 0.0f;
+    float powerUpTextAlpha = 255.0f;
+    float powerUpTextY = 250.0f;
+
+    // --- Novas variáveis para a fase do boss ---
+    bool inBossFight = false;
+    int playerLife = 100;
+    int bossLife = 100;
+    RectangleShape playerLifeBar;
+    RectangleShape bossLifeBar;
+    int correctHitsSinceLastBossPowerUp = 0;
+
 public:
     // --- No construtor ---
     Game() : window(VideoMode(800, 600), "Gerenciador de Reciclagem"), 
               score(0), reputation(100), phase(0), combo(0), spawnTimer(0), 
-              gameTimer(0), eventTimer(0), specialEvent(false), selectedWasteIndex(-1), inStartScreen(true) {
+              gameTimer(0), eventTimer(0), specialEvent(false), selectedWasteIndex(-1), 
+              inStartScreen(true), powerUpSpawnTimer(0), timeFreezeFactor(1.0f),
+              timeFreezeDuration(0.0f), shieldCount(0), comboBoostMultiplier(1.0f),
+              comboBoostDuration(0.0f), magnetActive(false), magnetDuration(0.0f),
+              inBossFight(false), playerLife(100), bossLife(100), correctHitsSinceLastBossPowerUp(0) {
         window.setFramerateLimit(60);
         srand(time(0));
 
@@ -197,6 +245,9 @@ public:
 
         // Carregar texturas das lixeiras UMA VEZ
         loadBinTextures();
+
+        // Carregar texturas dos power-ups
+        loadPowerUpTextures();
 
         // Configurar lixeiras
         setupBins();
@@ -240,7 +291,7 @@ public:
         soundIcon.setScale(0.08f, 0.08f);
         soundIcon.setPosition(730, 20);
 
-        // --- No construtor, carregue os backgrounds e configure o botão de continuar ---
+        // Carregar backgrounds
         if (!bgCommunity.loadFromFile("assets/textures/bg_community.png")) {
             cerr << "Erro ao carregar bg_community.png" << endl;
         }
@@ -249,6 +300,9 @@ public:
         }
         if (!bgMegacenter.loadFromFile("assets/textures/bg_megacenter.png")) {
             cerr << "Erro ao carregar bg_megacenter.png" << endl;
+        }
+        if (!bgBoss.loadFromFile("assets/textures/bg_boss.png")) {
+            cerr << "Erro ao carregar bg_boss.png" << endl;
         }
         bgSprite.setTexture(bgCommunity); // Começa na fase 1
 
@@ -270,7 +324,7 @@ public:
         levelInfoText.setStyle(Text::Bold);
         levelInfoText.setPosition(120, 180);
 
-        // --- No construtor, carregue os sons de vitória e derrota ---
+        // Carregar sons de vitória e derrota
         if (!victoryBuffer.loadFromFile("assets/sounds/victory.mp3")) {
             cerr << "Erro ao carregar victory.wav" << endl;
         }
@@ -280,6 +334,15 @@ public:
             cerr << "Erro ao carregar defeat.wav" << endl;
         }
         defeatSound.setBuffer(defeatBuffer);
+
+        // Configurar barras de vida para o boss fight
+        playerLifeBar.setSize(Vector2f(800, 20));
+        playerLifeBar.setFillColor(Color::Green);
+        playerLifeBar.setPosition(0, 580);
+
+        bossLifeBar.setSize(Vector2f(800, 20));
+        bossLifeBar.setFillColor(Color::Red);
+        bossLifeBar.setPosition(0, 0);
     }
 
     void setupTexts() {
@@ -303,6 +366,17 @@ public:
         messageText.setFillColor(Color::Red);
         messageText.setPosition(200, 250);
         messageText.setStyle(Text::Bold);
+
+        comboText.setFont(font);
+        comboText.setCharacterSize(24);
+        comboText.setFillColor(Color::White);
+        comboText.setPosition(20, 100);
+
+        comboMultiplierText.setFont(font);
+        comboMultiplierText.setCharacterSize(24);
+        comboMultiplierText.setFillColor(Color::Yellow);
+        comboMultiplierText.setStyle(Text::Bold);
+        comboMultiplierText.setPosition(150, 100);
 
         // Configurações para a tela inicial
         gameTitle.setFont(font);
@@ -388,20 +462,31 @@ public:
     }
 
     void loadPowerUpTextures() {
-        vector<pair<PowerUp::Type, string>> powerUpFiles = {
-            {PowerUp::COMBO_BOOST, "assets/textures/combo_boost.png"},
-            {PowerUp::TIME_FREEZE, "assets/textures/time_freeze.png"},
-            {PowerUp::MAGNET, "assets/textures/magnet.png"},
-            {PowerUp::SHIELD, "assets/textures/shield.png"}
+        vector<string> powerUpFiles = {
+            "assets/textures/combo_boost.png",
+            "assets/textures/time_freeze.png",
+            "assets/textures/magnet.png",
+            "assets/textures/shield.png",
+            "assets/textures/boss_damage.png" // Novo ícone para dano ao boss
         };
 
-        for (const auto& [type, file] : powerUpFiles) {
+        for (const auto& file : powerUpFiles) {
             Texture tex;
             if (!tex.loadFromFile(file)) {
                 cerr << "Erro ao carregar textura do power-up: " << file << endl;
-                continue;
+                // Cria textura de fallback
+                tex.create(50, 50);
+                Uint8* pixels = new Uint8[50 * 50 * 4];
+                for (int i = 0; i < 50 * 50 * 4; i += 4) {
+                    pixels[i] = 255;     // R
+                    pixels[i + 1] = 255; // G
+                    pixels[i + 2] = 0;   // B
+                    pixels[i + 3] = 255; // A
+                }
+                tex.update(pixels);
+                delete[] pixels;
             }
-            wasteTextures.push_back(tex); // Reutilizando o vetor de texturas
+            powerUpTextures.push_back(tex);
         }
 
         if (!powerUpBuffer.loadFromFile("assets/sounds/powerup.wav")) {
@@ -421,7 +506,7 @@ public:
             binTypes = {PAPER, PLASTIC, METAL};
         } else if (phase == INDUSTRIAL) {
             binTypes = {PAPER, PLASTIC, METAL, GLASS, ORGANIC};
-        } else {
+        } else if (phase == MEGACENTER || phase == BOSS) { // Boss usa todas as lixeiras
             binTypes = {PAPER, PLASTIC, METAL, GLASS, ORGANIC, ELECTRONIC, BATTERY};
         }
 
@@ -482,42 +567,80 @@ public:
     }
 
     void spawnPowerUp() {
-        if (rand() % 100 < 10) { // 10% de chance de spawnar
-            PowerUp::Type type = static_cast<PowerUp::Type>(rand() % 4);
-            activePowerUps.push_back(PowerUp(wasteTextures[type], type));
+        PowerUp::Type type;
+        if (phase == BOSS && inBossFight) {
+            // Só sorteia power-ups normais, exceto BOSS_DAMAGE (que é spawnado por acertos)
+            type = static_cast<PowerUp::Type>(rand() % (PowerUp::BOSS_DAMAGE)); // Não inclui BOSS_DAMAGE
+        } else {
+            type = static_cast<PowerUp::Type>(rand() % (PowerUp::BOSS_DAMAGE)); // Não inclui BOSS_DAMAGE
         }
+        activePowerUps.push_back(PowerUp(powerUpTextures[type], type));
     }
 
     void update() {
         float deltaTime = 1.0f / 60.0f;
         spawnTimer += deltaTime;
         gameTimer += deltaTime;
+        powerUpSpawnTimer += deltaTime;
+
+        // Atualizar efeitos de power-ups
+        updatePowerUpEffects(deltaTime);
 
         // Atualizar resíduos e verificar se algum passou do limite
         int wastesPassed = 0;
         for (auto& waste : activeWastes) {
-            if (waste.update()) {
+            if (waste.update(timeFreezeFactor)) {
                 wastesPassed++;
             }
         }
 
         // Atualizar power-ups
-        updatePowerUps(deltaTime);
+        for (auto& powerUp : activePowerUps) {
+            if (powerUp.update(deltaTime)) {
+                powerUp.active = false;
+            }
+        }
         
-        if (rand() % 1000 < 5) { // Ajuste a frequência
-            spawnPowerUp();
+        // Spawn de power-ups controlado por timer
+        if (powerUpSpawnTimer >= 3.0f) {
+            powerUpSpawnTimer = 0;
+            int chance = 0;
+            if (phase == COMMUNITY) {
+                chance = 30; // 30% na fase 1
+            } else if (phase == INDUSTRIAL) {
+                chance = 50; // 50% na fase 2
+            } else {
+                chance = 60; // 60% na fase 3
+            }
+            if (rand() % 100 < chance) {
+                spawnPowerUp();
+            }
         }
 
         // Penaliza reputação por cada lixo perdido
         if (wastesPassed > 0) {
-            reputation = max(0, reputation - wastesPassed * 7); // penalidade ajustada
-            combo = 0;
-            sound.setBuffer(wrongBuffer);
-            sound.play();
-            if (reputation <= 0) {
-                bgMusic.pause();
-                defeatSound.play();
-                inDefeatScreen = true;
+            if (inBossFight) {
+                // Na fase do boss, lixo perdido causa dano ao jogador
+                playerLife = max(0, playerLife - wastesPassed * 10);
+                if (playerLife <= 0) {
+                    inDefeatScreen = true;
+                    inBossFight = false;
+                    messageText.setString("Você perdeu para o Boss!");
+                }
+            } else if (shieldCount > 0) {
+                shieldCount--;
+                messageText.setString("Escudo absorveu o erro! (" + to_string(shieldCount) + " restantes)");
+                messageText.setFillColor(Color::Blue);
+            } else {
+                reputation = max(0, reputation - wastesPassed * 7); // penalidade ajustada
+                combo = 0;
+                sound.setBuffer(wrongBuffer);
+                sound.play();
+                if (reputation <= 0) {
+                    bgMusic.pause();
+                    defeatSound.play();
+                    inDefeatScreen = true;
+                }
             }
         }
 
@@ -526,19 +649,27 @@ public:
             [&](const Waste& w) {
                 return !w.active;
             }), activeWastes.end());
-        if (selectedWasteIndex >= static_cast<int>(activeWastes.size())) {
+
+        // Corrige o índice do lixo selecionado se necessário
+        if (selectedWasteIndex >= static_cast<int>(activeWastes.size()) || selectedWasteIndex < 0) {
             selectedWasteIndex = -1;
         }
 
+        // Remover power-ups inativos
+        activePowerUps.erase(remove_if(activePowerUps.begin(), activePowerUps.end(),
+            [&](const PowerUp& p) {
+                return !p.active;
+            }), activePowerUps.end());
+
         // Gerar novos resíduos
-        float spawnInterval = 2.0f - phase * 0.5f;
+        float spawnInterval = 2.0f - phase * 0.2f;
         if (spawnTimer > spawnInterval && activeWastes.size() < 5 + phase * 2) {
             spawnWaste();
             spawnTimer = 0;
         }
 
         // Eventos especiais na fase 3
-        if (phase == MEGACENTER) {
+        if (phase == MEGACENTER && !inBossFight) {
             eventTimer += deltaTime;
             if (eventTimer > 10.0f && !specialEvent) {
                 if (rand() % 100 < 30) {
@@ -582,7 +713,8 @@ public:
         ss << "Fase: ";
         if (phase == COMMUNITY) ss << "Centro Comunitario";
         else if (phase == INDUSTRIAL) ss << "Expansao Industrial";
-        else ss << "Megacentro Urbano";
+        else if (phase == MEGACENTER) ss << "Megacentro Urbano";
+        else ss << "BOSS FINAL";
         phaseText.setString(ss.str());
         
         ss.str("");
@@ -590,6 +722,128 @@ public:
         reputationText.setString(ss.str());
         
         reputationBar.setSize(Vector2f(2.0f * reputation, 20));
+        
+        // Atualizar combo text
+        ss.str("");
+        ss << "Combo: " << combo;
+        comboText.setString(ss.str());
+        
+        ss.str("");
+        ss << "x" << fixed << setprecision(1) << comboBoostMultiplier;
+        comboMultiplierText.setString(ss.str());
+        comboMultiplierText.setPosition(150 + comboText.getLocalBounds().width, 100);
+        
+        // Atualizar mensagens temporárias e animação do texto de power-up
+        if (!messageText.getString().isEmpty()) {
+            powerUpTextTimer += deltaTime;
+            // Fade out e movimento para cima
+            if (powerUpTextTimer > 0.5f) {
+                powerUpTextAlpha = max(0.0f, 255.0f - (powerUpTextTimer - 0.5f) * 255.0f);
+                powerUpTextY -= deltaTime * 30.0f; // Sobe lentamente
+                messageText.setFillColor(Color(
+                    messageText.getFillColor().r,
+                    messageText.getFillColor().g,
+                    messageText.getFillColor().b,
+                    static_cast<Uint8>(powerUpTextAlpha)
+                ));
+                messageText.setPosition(400 - messageText.getLocalBounds().width / 2, powerUpTextY);
+            }
+            if (powerUpTextTimer > 1.5f) {
+                messageText.setString(""); // Limpa após 1.5 segundos
+                powerUpTextTimer = 0.0f;
+                powerUpTextAlpha = 255.0f;
+                powerUpTextY = 250.0f;
+            }
+        }
+
+        // --- Verifica vitória/derrota do boss ---
+        if (inBossFight) {
+            if (playerLife <= 0) {
+                inDefeatScreen = true;
+                inBossFight = false;
+                messageText.setString("Você perdeu para o Boss!");
+            } else if (bossLife <= 0) {
+                inBossFight = false;
+                inLevelTransition = true;
+                levelInfoText.setString("Parabéns! Você derrotou o Boss!");
+                bgMusic.pause();
+                victorySound.play();
+            }
+        }
+    }
+
+    void updatePowerUpEffects(float deltaTime) {
+        // Atualizar efeito de congelamento
+        if (timeFreezeDuration > 0) {
+            timeFreezeDuration -= deltaTime;
+            
+            // Transição suave: 0-1 segundos: congelando, 4-5 segundos: descongelando
+            if (timeFreezeDuration > 4.0f) {
+                timeFreezeFactor = max(0.1f, 1.0f - (5.0f - timeFreezeDuration));
+            } else if (timeFreezeDuration < 1.0f) {
+                timeFreezeFactor = min(1.0f, timeFreezeDuration);
+            } else {
+                timeFreezeFactor = 0.1f;
+            }
+            
+            if (timeFreezeDuration <= 0) {
+                timeFreezeFactor = 1.0f;
+            }
+        }
+        
+        // Atualizar efeito de combo boost
+        if (comboBoostDuration > 0) {
+            comboBoostDuration -= deltaTime;
+            if (comboBoostDuration <= 0) {
+                comboBoostMultiplier = 1.0f;
+            }
+        }
+        
+        // Atualizar efeito de magnet
+        if (magnetActive) {
+                magnetDuration -= deltaTime;
+                if (magnetDuration <= 0) {
+                    magnetActive = false;
+                } else {
+                    // Atrair resíduos para as lixeiras correspondentes
+                    for (auto& waste : activeWastes) {
+                        if (!waste.active) continue;
+                        if (binBounds.find(waste.type) != binBounds.end()) {
+                            FloatRect binRect = binBounds[waste.type];
+                            Vector2f target(binRect.left + binRect.width/2, binRect.top + binRect.height/2);
+
+                            // Move diretamente para o centro da lixeira se estiver próximo ou se magnet estiver ativo
+                            Vector2f direction = target - waste.sprite.getPosition();
+                            float distance = sqrt(direction.x*direction.x + direction.y*direction.y);
+
+                            // Se estiver longe, move gradualmente
+                            if (distance > 10.0f) {
+                                direction = direction / distance; // Normaliza
+                                waste.velocity = direction * 8.0f; // Move rápido para garantir acerto
+                            } else {
+                                // Coleta automaticamente
+                                waste.sprite.setPosition(target);
+                                int points = static_cast<int>(5 * comboBoostMultiplier);
+                                score += points;
+                                combo++;
+                                comboClock.restart();
+                                
+                                // Na fase do boss, acertos recuperam vida
+                                if (inBossFight) {
+                                    playerLife = min(100, playerLife + 5);
+                                } else {
+                                    reputation = min(100, reputation + 2);
+                                }
+                                
+                                waste.active = false;
+                                waste.sprite.setColor(Color(100, 250, 100)); // Verde claro
+                                sound.setBuffer(correctBuffer);
+                                sound.play();
+                            }
+                        }
+                    }
+                }
+        }
     }
 
     void handleClick(Vector2f mousePos) {
@@ -626,57 +880,93 @@ public:
             }
             // Se não clicou em outro lixo, tenta jogar na lixeira
             if (!clickedAnotherWaste) {
-                bool correct = false;
+                bool clickedBin = false;
                 WasteType selectedType = activeWastes[selectedWasteIndex].type;
 
                 for (const auto& bin : binBounds) {
                     if (bin.second.contains(mousePos)) {
-                        if (bin.first == selectedType) {
-                            correct = true;
+                        clickedBin = true;
+                        bool correct = (bin.first == selectedType);
+
+                        if (correct) {
+                            sound.setBuffer(correctBuffer);
+                            sound.play();
+
+                            int points = 5 + combo;
+                            points = static_cast<int>(points * comboBoostMultiplier);
+                            score += points;
+
+                            combo++;
+                            comboClock.restart();
+                            
+                            // Na fase do boss, acertos recuperam vida
+                            if (inBossFight) {
+                                playerLife = min(100, playerLife + 5);
+                            } else {
+                                reputation = min(100, reputation + 2);
+                            }
+
+                            if (inBossFight) {
+                                correctHitsSinceLastBossPowerUp++;
+                                if (correctHitsSinceLastBossPowerUp >= 5) {
+                                    spawnBossPowerUp();
+                                    correctHitsSinceLastBossPowerUp = 0;
+                                }
+                            }
+                        } else {
+                            if (inBossFight) {
+                                playerLife = max(0, playerLife - 10);
+                            } else {
+                                reputation = max(0, reputation - 10);
+                            }
+                            sound.setBuffer(wrongBuffer);
+                            sound.play();
+                            combo = 0;
+                            if (!inBossFight && reputation <= 0) {
+                                bgMusic.pause();
+                                defeatSound.play();
+                                inDefeatScreen = true;
+                            }
                         }
-                        break;
+
+                        // Remover apenas o item selecionado
+                        if (selectedWasteIndex >= 0 && selectedWasteIndex < static_cast<int>(activeWastes.size())) {
+                            activeWastes.erase(activeWastes.begin() + selectedWasteIndex);
+                        }
+                        selectedWasteIndex = -1;
+                        break; // Sai do loop das lixeiras
                     }
                 }
-
-                if (correct) {
-                    sound.setBuffer(correctBuffer);
-                    sound.play();
-                    int points = 5 + (combo * 2);
-                    score += points;
-                    combo++;
-                    comboClock.restart();
-                    reputation = min(100, reputation + 2);
-                } else {
-                    sound.setBuffer(wrongBuffer);
-                    sound.play();
-                    combo = 0;
-                    reputation = max(0, reputation - 10);
-                    if (reputation <= 0) {
-                        bgMusic.pause();
-                        defeatSound.play();
-                        inDefeatScreen = true;
+                // Se não clicou em lixeira, apenas desmarca o lixo selecionado e não faz nada
+                if (!clickedBin) {
+                    if (selectedWasteIndex >= 0 && selectedWasteIndex < static_cast<int>(activeWastes.size())) {
+                        activeWastes[selectedWasteIndex].sprite.setColor(Color::White);
                     }
+                    selectedWasteIndex = -1;
                 }
-
-                // Remover apenas o item selecionado
-                if (selectedWasteIndex >= 0 && selectedWasteIndex < static_cast<int>(activeWastes.size())) {
-                    activeWastes.erase(activeWastes.begin() + selectedWasteIndex);
-                }
-                selectedWasteIndex = -1;
             }
+        }
+    }
+
+    void spawnBossPowerUp() {
+        if (phase == BOSS && inBossFight) {
+            activePowerUps.push_back(PowerUp(powerUpTextures[PowerUp::BOSS_DAMAGE], PowerUp::BOSS_DAMAGE));
         }
     }
 
     void handlePowerUpClick(Vector2f mousePos) {
         for (size_t i = 0; i < activePowerUps.size(); ++i) {
-            if (activePowerUps[i].sprite.getGlobalBounds().contains(mousePos)) {
-                if (inventory.size() < 2) {
-                    inventory.push_back(activePowerUps[i].type);
-                    powerUpSound.play();
-                    activePowerUps.erase(activePowerUps.begin() + i);
+            // Verifica se o clique foi no efeito de brilho (maior e mais fácil de clicar)
+            if (activePowerUps[i].glowEffect.getGlobalBounds().contains(mousePos)) {
+                if (activePowerUps[i].type == PowerUp::BOSS_DAMAGE && inBossFight) {
+                    bossLife = max(0, bossLife - 25); // Aumenta o dano ao boss
+                    messageText.setString("Ataque no Boss! -25 HP");
+                    messageText.setFillColor(Color::Red);
                 } else {
-                    // Inventário cheio, exibir mensagem ou ignorar
+                    usePowerUp(activePowerUps[i].type);
                 }
+                powerUpSound.play();
+                activePowerUps[i].active = false;
                 break;
             }
         }
@@ -684,12 +974,15 @@ public:
 
     // --- Adicione uma função para atualizar o background conforme a fase ---
     void updateBackground() {
-        if (phase == COMMUNITY)
+        if (phase == BOSS) {
+            bgSprite.setTexture(bgBoss, true);
+        } else if (phase == COMMUNITY) {
             bgSprite.setTexture(bgCommunity, true);
-        else if (phase == INDUSTRIAL)
+        } else if (phase == INDUSTRIAL) {
             bgSprite.setTexture(bgIndustrial, true);
-        else
+        } else {
             bgSprite.setTexture(bgMegacenter, true);
+        }
 
         // Ajusta o tamanho do background para preencher a janela
         IntRect texRect = bgSprite.getTextureRect();
@@ -715,8 +1008,7 @@ public:
             victorySound.play();
         } else if (phase == MEGACENTER && score >= 240 && !inLevelTransition) {
             inLevelTransition = true;
-            levelInfoText.setString("Parabens! Jogo completo!\nPontuacao final: " + to_string(score) +
-                               "\nReputacao final: " + to_string(reputation) + "%");
+            levelInfoText.setString("Boss Fight!\nPrepare-se para o desafio final!");
             bgMusic.pause();
             victorySound.play();
         }
@@ -752,23 +1044,27 @@ public:
         spawnTimer = 0;
         gameTimer = 0;
         eventTimer = 0;
+        powerUpSpawnTimer = 0;
         specialEvent = false;
         selectedWasteIndex = -1;
         activeWastes.clear();
+        activePowerUps.clear();
+        inventory.clear();
         inLevelTransition = false;
         inDefeatScreen = false;
+        timeFreezeFactor = 1.0f;
+        timeFreezeDuration = 0.0f;
+        shieldCount = 0;
+        comboBoostMultiplier = 1.0f;
+        comboBoostDuration = 0.0f;
+        magnetActive = false;
+        magnetDuration = 0.0f;
+        inBossFight = false;
+        playerLife = 100;
+        bossLife = 100;
+        correctHitsSinceLastBossPowerUp = 0;
         setupBins();
         updateBackground();
-    }
-
-    void updatePowerUps(float deltaTime) {
-        for (auto& powerUp : activePowerUps) {
-            powerUp.update(deltaTime);
-        }
-
-        // Remover power-ups inativos
-        activePowerUps.erase(remove_if(activePowerUps.begin(), activePowerUps.end(),
-            [](const PowerUp& p) { return !p.active; }), activePowerUps.end());
     }
 
     void renderPowerUps() {
@@ -781,23 +1077,149 @@ public:
     void usePowerUp(PowerUp::Type type) {
         switch (type) {
             case PowerUp::COMBO_BOOST:
-                combo *= 3;
+                comboBoostMultiplier = 3.0f;
+                comboBoostDuration = 10.0f;
+                messageText.setString("Combo Boost Ativado! Pontos triplicados!");
+                messageText.setFillColor(Color::Yellow);
                 break;
+
             case PowerUp::TIME_FREEZE:
-                for (auto& waste : activeWastes) {
-                    waste.velocity.y = 0;
-                }
-                // Adicione lógica para restaurar a velocidade após 5 segundos
+                timeFreezeDuration = 5.0f;
+                messageText.setString("Time Freeze Ativado! Velocidade reduzida!");
+                messageText.setFillColor(Color::Cyan);
                 break;
+
             case PowerUp::MAGNET:
-                for (auto& waste : activeWastes) {
-                    waste.active = false; // Simula coleta automática
-                    score += 5; // Pontuação extra
-                }
+                magnetActive = true;
+                magnetDuration = 5.0f;
+                messageText.setString("Magnet Ativado! Residuos sendo atraidos!");
+                messageText.setFillColor(Color::Green);
                 break;
+
             case PowerUp::SHIELD:
-                // Ignore o próximo erro
+                shieldCount += 3;
+                messageText.setString("Shield Ativado! +3 escudos de protecao!");
+                messageText.setFillColor(Color::Blue);
                 break;
+        }
+        messageText.setStyle(Text::Bold);
+        messageText.setPosition(400 - messageText.getLocalBounds().width / 2, powerUpTextY);
+        powerUpTextTimer = 0.0f;
+        powerUpTextAlpha = 255.0f;
+        powerUpTextY = 250.0f;
+        comboClock.restart();
+    }
+
+    void renderActivePowerUpEffects() {
+        float x = 650;
+        float y = 100;
+        float spacing = 50;
+
+        // Time Freeze
+        if (timeFreezeDuration > 0) {
+            Sprite icon;
+            icon.setTexture(powerUpTextures[PowerUp::TIME_FREEZE]);
+            icon.setScale(0.06f, 0.06f);
+            icon.setPosition(x, y);
+            window.draw(icon);
+
+            // Barra de tempo
+            RectangleShape barBack(Vector2f(40, 5));
+            barBack.setFillColor(Color(50,50,50));
+            barBack.setPosition(x + 50, y + 25);
+            window.draw(barBack);
+
+            float ratio = timeFreezeDuration / 5.0f;
+            RectangleShape bar(Vector2f(40 * ratio, 5));
+            bar.setFillColor(Color::Cyan);
+            bar.setPosition(x + 50, y + 25);
+            window.draw(bar);
+            
+            y += spacing;
+        }
+
+        // Combo Boost
+        if (comboBoostDuration > 0) {
+            Sprite icon;
+            icon.setTexture(powerUpTextures[PowerUp::COMBO_BOOST]);
+            icon.setScale(0.06f, 0.06f);
+            icon.setPosition(x, y);
+            window.draw(icon);
+
+            // Barra de tempo
+            RectangleShape barBack(Vector2f(40, 5));
+            barBack.setFillColor(Color(50,50,50));
+            barBack.setPosition(x + 50, y + 25);
+            window.draw(barBack);
+
+            float ratio = comboBoostDuration / 10.0f;
+            RectangleShape bar(Vector2f(40 * ratio, 5));
+            bar.setFillColor(Color::Yellow);
+            bar.setPosition(x + 50, y + 25);
+            window.draw(bar);
+            
+            // Multiplicador
+            Text multText;
+            multText.setFont(font);
+            multText.setString("x" + to_string(static_cast<int>(comboBoostMultiplier)));
+            multText.setCharacterSize(20);
+            multText.setFillColor(Color::Yellow);
+            multText.setPosition(x + 100, y);
+            window.draw(multText);
+            
+            y += spacing;
+        }
+
+        // Magnet
+        if (magnetActive) {
+            Sprite icon;
+            icon.setTexture(powerUpTextures[PowerUp::MAGNET]);
+            icon.setScale(0.06f, 0.06f);
+            icon.setPosition(x, y);
+            window.draw(icon);
+
+            // Barra de tempo
+            RectangleShape barBack(Vector2f(40, 5));
+            barBack.setFillColor(Color(50,50,50));
+            barBack.setPosition(x + 50, y + 25);
+            window.draw(barBack);
+
+            float ratio = magnetDuration / 5.0f;
+            RectangleShape bar(Vector2f(40 * ratio, 5));
+            bar.setFillColor(Color::Green);
+            bar.setPosition(x + 50, y + 25);
+            window.draw(bar);
+            
+            y += spacing;
+        }
+
+        // Shield
+        if (shieldCount > 0) {
+            Sprite icon;
+            icon.setTexture(powerUpTextures[PowerUp::SHIELD]);
+            icon.setScale(0.06f, 0.06f);
+            icon.setPosition(x, y);
+            window.draw(icon);
+
+            // Contador
+            Text countText;
+            countText.setFont(font);
+            countText.setString(to_string(shieldCount));
+            countText.setCharacterSize(24);
+            countText.setFillColor(Color::Blue);
+            countText.setStyle(Text::Bold);
+            countText.setPosition(x + 40, y - 5);
+            window.draw(countText);
+        }
+    }
+
+    void renderLifeBars() {
+        if (inBossFight) {
+            // Atualiza tamanho das barras
+            playerLifeBar.setSize(Vector2f(800.0f * playerLife / 100.0f, 20));
+            bossLifeBar.setSize(Vector2f(800.0f * bossLife / 100.0f, 20));
+            window.draw(bossLifeBar);
+            window.draw(playerLifeBar);
         }
     }
 
@@ -818,12 +1240,14 @@ public:
                                 sound.setVolume(0);
                                 victorySound.setVolume(0);
                                 defeatSound.setVolume(0);
+                                powerUpSound.setVolume(0);
                                 soundIcon.setTexture(soundOffTex);
                             } else {
                                 bgMusic.setVolume(100);
                                 sound.setVolume(100);
                                 victorySound.setVolume(100);
                                 defeatSound.setVolume(100);
+                                powerUpSound.setVolume(100);
                                 soundIcon.setTexture(soundOnTex);
                             }
                         }
@@ -840,6 +1264,9 @@ public:
                         Vector2f mousePos(event.mouseButton.x, event.mouseButton.y);
                         if (continueButton.getGlobalBounds().contains(mousePos)) {
                             inLevelTransition = false;
+                            activeWastes.clear();
+                            combo = 0;
+                            selectedWasteIndex = -1;
                             if (phase == COMMUNITY) {
                                 phase = INDUSTRIAL;
                                 setupBins();
@@ -851,7 +1278,18 @@ public:
                                 updateBackground();
                                 bgMusic.play();
                             } else if (phase == MEGACENTER) {
-                                // Volta ao menu inicial após última fase
+                                phase = BOSS;
+                                setupBins();
+                                updateBackground();
+                                inBossFight = true;
+                                activeWastes.clear();
+                                activePowerUps.clear();
+                                combo = 0;
+                                playerLife = 100;
+                                bossLife = 100;
+                                correctHitsSinceLastBossPowerUp = 0;
+                                bgMusic.play();
+                            } else if (phase == BOSS) {
                                 inStartScreen = true;
                                 resetGame();
                                 bgMusic.play();
@@ -870,7 +1308,13 @@ public:
                 }
                 if (!inStartScreen && !inLevelTransition && !inDefeatScreen && event.type == Event::MouseButtonPressed) {
                     if (event.mouseButton.button == Mouse::Left) {
-                        handleClick(Vector2f(event.mouseButton.x, event.mouseButton.y));
+                        Vector2f mousePos(event.mouseButton.x, event.mouseButton.y);
+
+                        // Primeiro verifica power-ups
+                        handlePowerUpClick(mousePos);
+
+                        // Depois verifica lixos e lixeiras
+                        handleClick(mousePos);
                     }
                 }
             }
@@ -917,6 +1361,7 @@ public:
             update();
             checkPhaseTransition();
 
+            updateBackground();
             window.draw(bgSprite);
 
             for (const auto& bin : bins) {
@@ -928,17 +1373,34 @@ public:
             for (const auto& waste : activeWastes) {
                 window.draw(waste.sprite);
             }
+            renderPowerUps();
+            
             window.draw(scoreText);
             window.draw(phaseText);
-            window.draw(reputationText);
-            window.draw(reputationBarBack);
-            window.draw(reputationBar);
-
-            if (specialEvent) {
-                window.draw(messageText);
+            
+            // Não mostrar reputação na fase do boss
+            if (!inBossFight) {
+                window.draw(reputationText);
+                window.draw(reputationBarBack);
+                window.draw(reputationBar);
+            }
+            
+            window.draw(comboText);
+            
+            if (comboBoostMultiplier > 1.0f) {
+                window.draw(comboMultiplierText);
             }
 
-            renderPowerUps(); 
+            // Desenhar efeitos visuais para power-ups ativos
+            renderActivePowerUpEffects();
+
+            if (specialEvent || !messageText.getString().isEmpty()) {
+                window.draw(messageText);
+            }
+            
+            if (inBossFight) {
+                renderLifeBars();
+            }
 
             window.display();
         }
