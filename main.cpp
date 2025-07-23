@@ -172,11 +172,17 @@ private:
 
     // --- Adicione estas variáveis na sua classe Game ---
     Texture bgCommunity, bgIndustrial, bgMegacenter, bgBoss;
+    Texture playerPortraitTex, bossPortraitTex; // Texturas para retratos
     Sprite bgSprite;
+    Sprite playerPortrait, bossPortrait; // Sprites para retratos
     bool inLevelTransition = false;
+    bool inIntroStory = true; // Nova tela de introdução
+    bool inBossIntro = false; // Introdução para o boss
     RectangleShape continueButton;
     Text continueButtonText;
     Text levelInfoText;
+    Text storyText; // Texto para a história
+    RectangleShape storyPanel; // Painel para fundo da história
 
     SoundBuffer victoryBuffer, defeatBuffer;
     Sound victorySound, defeatSound;
@@ -215,6 +221,8 @@ private:
     int bossLife = 100;
     RectangleShape playerLifeBar;
     RectangleShape bossLifeBar;
+    RectangleShape playerLifeBarBack; // Fundo da barra de vida do jogador
+    RectangleShape bossLifeBarBack;    // Fundo da barra de vida do boss
     int correctHitsSinceLastBossPowerUp = 0;
 
 public:
@@ -304,6 +312,46 @@ public:
         if (!bgBoss.loadFromFile("assets/textures/bg_boss.png")) {
             cerr << "Erro ao carregar bg_boss.png" << endl;
         }
+        
+        // Carregar texturas para retratos
+        if (!playerPortraitTex.loadFromFile("assets/textures/player_portrait.png")) {
+            cerr << "Erro ao carregar player_portrait.png" << endl;
+            // Fallback: criar textura verde
+            playerPortraitTex.create(50, 50);
+            Uint8* pixels = new Uint8[50 * 50 * 4];
+            fill(pixels, pixels + 50 * 50 * 4, 0);
+            for (int i = 0; i < 50 * 50 * 4; i += 4) {
+                pixels[i] = 0;    // R
+                pixels[i+1] = 200; // G
+                pixels[i+2] = 0;   // B
+                pixels[i+3] = 255; // A
+            }
+            playerPortraitTex.update(pixels);
+            delete[] pixels;
+        }
+        playerPortrait.setTexture(playerPortraitTex);
+        playerPortrait.setScale(0.035f, 0.035f);
+        
+        if (!bossPortraitTex.loadFromFile("assets/textures/boss_portrait.png")) {
+            cerr << "Erro ao carregar boss_portrait.png" << endl;
+            // Fallback: criar textura vermelha
+            bossPortraitTex.create(50, 50);
+            Uint8* pixels = new Uint8[50 * 50 * 4];
+            fill(pixels, pixels + 50 * 50 * 4, 0);
+            for (int i = 0; i < 50 * 50 * 4; i += 4) {
+                pixels[i]   = 200;   // R
+                pixels[i+1] = 0;   // G
+                pixels[i+2] = 0;   // B
+                pixels[i+3] = 255; // A
+            }
+            bossPortraitTex.update(pixels);
+            delete[] pixels;
+        }
+        bossPortrait.setTexture(bossPortraitTex);
+        if(!inBossIntro) {
+            bossPortrait.setScale(0.035f, 0.035f);
+        }
+        
         bgSprite.setTexture(bgCommunity); // Começa na fase 1
 
         // Botão de continuar
@@ -324,6 +372,18 @@ public:
         levelInfoText.setStyle(Text::Bold);
         levelInfoText.setPosition(120, 180);
 
+        // Configurar painel e texto para história
+        storyPanel.setSize(Vector2f(700, 420));
+        storyPanel.setFillColor(Color(0, 0, 0, 180));
+        storyPanel.setOutlineColor(Color::White);
+        storyPanel.setOutlineThickness(2);
+        storyPanel.setPosition(50, 100);
+        
+        storyText.setFont(font);
+        storyText.setCharacterSize(22);
+        storyText.setFillColor(Color::White);
+        storyText.setPosition(80, 120);
+
         // Carregar sons de vitória e derrota
         if (!victoryBuffer.loadFromFile("assets/sounds/victory.mp3")) {
             cerr << "Erro ao carregar victory.wav" << endl;
@@ -336,13 +396,26 @@ public:
         defeatSound.setBuffer(defeatBuffer);
 
         // Configurar barras de vida para o boss fight
-        playerLifeBar.setSize(Vector2f(800, 20));
+        // Reduzir o tamanho para 600px
+        playerLifeBarBack.setSize(Vector2f(600, 20));
+        playerLifeBarBack.setFillColor(Color(200, 200, 200)); // Fundo cinza
+        playerLifeBarBack.setOutlineColor(Color::Black);
+        playerLifeBarBack.setOutlineThickness(2);
+        playerLifeBarBack.setPosition(100, 570); // Reposicionado
+        
+        playerLifeBar.setSize(Vector2f(600, 20));
         playerLifeBar.setFillColor(Color::Green);
-        playerLifeBar.setPosition(0, 580);
+        playerLifeBar.setPosition(100, 570); // Reposicionado
 
-        bossLifeBar.setSize(Vector2f(800, 20));
+        bossLifeBarBack.setSize(Vector2f(600, 20));
+        bossLifeBarBack.setFillColor(Color(200, 200, 200)); // Fundo cinza
+        bossLifeBarBack.setOutlineColor(Color::Black);
+        bossLifeBarBack.setOutlineThickness(2);
+        bossLifeBarBack.setPosition(100, 10); // Reposicionado
+        
+        bossLifeBar.setSize(Vector2f(600, 20));
         bossLifeBar.setFillColor(Color::Red);
-        bossLifeBar.setPosition(0, 0);
+        bossLifeBar.setPosition(100, 10); // Reposicionado
     }
 
     void setupTexts() {
@@ -513,6 +586,12 @@ public:
         float binWidth = 70.0f;
         float spacing = (800.0f - (binWidth * binTypes.size())) / (binTypes.size() + 1);
 
+        // Ajuste da posição Y: na fase do boss, subir as lixeiras
+        float binY = 500.0f;
+        if (phase == BOSS) {
+            binY = 450.0f;
+        }
+
         for (int i = 0; i < binTypes.size(); i++) {
             WasteType type = binTypes[i];
 
@@ -525,8 +604,7 @@ public:
             bin.setTexture(binTextures[type]);
             bin.setScale(0.2f, 0.2f);
             float x = spacing + i * (binWidth + spacing);
-            float y = 500;
-            bin.setPosition(x, y);
+            bin.setPosition(x, binY); // Usando binY
             bins.push_back(bin);
             binBounds[type] = bin.getGlobalBounds();
 
@@ -547,8 +625,7 @@ public:
             text.setString(label);
             text.setCharacterSize(14);
             text.setFillColor(Color::White);
-            FloatRect bounds = bin.getGlobalBounds();
-            text.setPosition(x + (binWidth * 0.1f), y + 70); // Ajuste fino se necessário
+            text.setPosition(x + (binWidth * 0.1f), binY + 70); // Ajuste em Y também
             binLabels.push_back(text);
         }
     }
@@ -619,7 +696,13 @@ public:
 
         // Penaliza reputação por cada lixo perdido
         if (wastesPassed > 0) {
-            if (inBossFight) {
+            // CORREÇÃO: shield agora funciona na fase do boss também
+            if (shieldCount > 0) {
+                shieldCount--;
+                messageText.setString("Escudo absorveu o erro! (" + to_string(shieldCount) + " restantes)");
+                messageText.setFillColor(Color::Blue);
+            } 
+            else if (inBossFight) {
                 // Na fase do boss, lixo perdido causa dano ao jogador
                 playerLife = max(0, playerLife - wastesPassed * 10);
                 if (playerLife <= 0) {
@@ -627,11 +710,8 @@ public:
                     inBossFight = false;
                     messageText.setString("Você perdeu para o Boss!");
                 }
-            } else if (shieldCount > 0) {
-                shieldCount--;
-                messageText.setString("Escudo absorveu o erro! (" + to_string(shieldCount) + " restantes)");
-                messageText.setFillColor(Color::Blue);
-            } else {
+            } 
+            else {
                 reputation = max(0, reputation - wastesPassed * 7); // penalidade ajustada
                 combo = 0;
                 sound.setBuffer(wrongBuffer);
@@ -1052,6 +1132,8 @@ public:
         inventory.clear();
         inLevelTransition = false;
         inDefeatScreen = false;
+        inIntroStory = true; // Reinicia com a história
+        inBossIntro = false;
         timeFreezeFactor = 1.0f;
         timeFreezeDuration = 0.0f;
         shieldCount = 0;
@@ -1216,10 +1298,42 @@ public:
     void renderLifeBars() {
         if (inBossFight) {
             // Atualiza tamanho das barras
-            playerLifeBar.setSize(Vector2f(800.0f * playerLife / 100.0f, 20));
-            bossLifeBar.setSize(Vector2f(800.0f * bossLife / 100.0f, 20));
+            playerLifeBar.setSize(Vector2f(600.0f * playerLife / 100.0f, 20));
+            bossLifeBar.setSize(Vector2f(600.0f * bossLife / 100.0f, 20));
+            
+            // Desenha fundos
+            window.draw(playerLifeBarBack);
+            window.draw(bossLifeBarBack);
+            
+            // Desenha barras de vida
             window.draw(bossLifeBar);
             window.draw(playerLifeBar);
+            
+            // Desenha retratos ao lado das barras
+            bossPortrait.setPosition(30, 10); // Reposicionado
+            window.draw(bossPortrait);
+            
+            playerPortrait.setPosition(30, 540); // Reposicionado
+            window.draw(playerPortrait);
+            
+            // Desenha textos de vida
+            Text bossLifeText;
+            bossLifeText.setFont(font);
+            bossLifeText.setString(to_string(bossLife) + "%");
+            bossLifeText.setCharacterSize(20);
+            bossLifeText.setFillColor(Color::White);
+            bossLifeText.setStyle(Text::Bold);
+            bossLifeText.setPosition(720, 15); // Reposicionado
+            window.draw(bossLifeText);
+            
+            Text playerLifeText;
+            playerLifeText.setFont(font);
+            playerLifeText.setString(to_string(playerLife) + "%");
+            playerLifeText.setCharacterSize(20);
+            playerLifeText.setFillColor(Color::White);
+            playerLifeText.setStyle(Text::Bold);
+            playerLifeText.setPosition(720, 565); // Reposicionado
+            window.draw(playerLifeText);
         }
     }
 
@@ -1230,6 +1344,8 @@ public:
                 if (event.type == Event::Closed) {
                     window.close();
                 }
+                
+                // Controle de som na tela inicial
                 if (inStartScreen && event.type == Event::MouseButtonPressed) {
                     if (event.mouseButton.button == Mouse::Left) {
                         Vector2f mousePos(event.mouseButton.x, event.mouseButton.y);
@@ -1258,6 +1374,22 @@ public:
                         }
                     }
                 }
+                
+                // Tela de história inicial
+                if (inIntroStory && event.type == Event::MouseButtonPressed) {
+                    if (event.mouseButton.button == Mouse::Left) {
+                        inIntroStory = false;
+                    }
+                }
+                
+                // Tela de introdução do boss
+                if (inBossIntro && event.type == Event::MouseButtonPressed) {
+                    if (event.mouseButton.button == Mouse::Left) {
+                        inBossIntro = false;
+                        inBossFight = true;
+                    }
+                }
+                
                 // --- Evento para continuar na tela de transição ---
                 if (inLevelTransition && event.type == Event::MouseButtonPressed) {
                     if (event.mouseButton.button == Mouse::Left) {
@@ -1281,13 +1413,7 @@ public:
                                 phase = BOSS;
                                 setupBins();
                                 updateBackground();
-                                inBossFight = true;
-                                activeWastes.clear();
-                                activePowerUps.clear();
-                                combo = 0;
-                                playerLife = 100;
-                                bossLife = 100;
-                                correctHitsSinceLastBossPowerUp = 0;
+                                inBossIntro = true; // Mostra introdução antes do boss
                                 bgMusic.play();
                             } else if (phase == BOSS) {
                                 inStartScreen = true;
@@ -1306,7 +1432,8 @@ public:
                         bgMusic.play();
                     }
                 }
-                if (!inStartScreen && !inLevelTransition && !inDefeatScreen && event.type == Event::MouseButtonPressed) {
+                if (!inStartScreen && !inLevelTransition && !inDefeatScreen && 
+                    !inIntroStory && !inBossIntro && event.type == Event::MouseButtonPressed) {
                     if (event.mouseButton.button == Mouse::Left) {
                         Vector2f mousePos(event.mouseButton.x, event.mouseButton.y);
 
@@ -1338,6 +1465,78 @@ public:
                 window.draw(startButton);
                 window.draw(startButtonText);
                 window.draw(soundIcon);
+                window.display();
+                continue;
+            }
+
+            // --- Tela de introdução da história ---
+            if (inIntroStory) {
+                window.clear(Color(40, 40, 60));
+                
+                // Desenhar fundo temático
+                RectangleShape storyBg(Vector2f(800, 600));
+                storyBg.setFillColor(Color(30, 50, 70));
+                window.draw(storyBg);
+                
+                // Painel para texto
+                storyPanel.setFillColor(Color(0, 0, 0, 200));
+                window.draw(storyPanel);
+                
+                // Texto da história
+                storyText.setString(
+                    "Bem-vindo ao Gerenciador de Reciclagem!\n\n"
+                    "Voce e o novo diretor de sustentabilidade da cidade.\n"
+                    "Nosso planeta esta sendo sufocado por residuos,\n"
+                    "e cabe a voce organizar a coleta seletiva.\n\n"
+                    "Sua missao:\n"
+                    "Classificar corretamente os residuos que estao caindo\n"
+                    "dos caminhoes de coleta antes que poluam a cidade.\n\n"
+                    "Cada acerto aumenta sua reputacao e pontos.\n"
+                    "Erros ou residuos perdidos diminuem sua reputacao.\n\n"
+                    "Clique para comecar sua jornada!"
+                );
+                window.draw(storyText);
+                
+                window.display();
+                continue;
+            }
+            
+            // --- Tela de introdução do boss ---
+            if (inBossIntro) {
+                window.clear(Color(70, 30, 30));
+                
+                // Desenhar fundo temático
+                RectangleShape storyBg(Vector2f(800, 600));
+                storyBg.setFillColor(Color(60, 30, 40));
+                window.draw(storyBg);
+                
+                // Painel para texto
+                storyPanel.setFillColor(Color(0, 0, 0, 200));
+                window.draw(storyPanel);
+                
+                // Texto da história do boss
+                storyText.setString(
+                    "BOSS FINAL: A INDUSTRIA POLUIDORA\n\n"
+                    "Voce chegou ao desafio final!\n"
+                    "A Industria Poluidora, liderada pelo CEO Ganancioso,\n"
+                    "esta despejando residuos toxicos em massa!\n\n"
+                    "Sua missao agora e pessoal:\n"
+                    "Derrote a Industria Poluidora antes que ela destrua\n"
+                    "todos os seus esforcos de reciclagem!\n\n"
+                    "Diferente das fases anteriores:\n"
+                    "- Cada erro reduz sua barra de vida\n"
+                    "- Acertos recuperam um pouco de vida\n"
+                    "- A cada 5 acertos, aparece um power-up especial\n"
+                    "  que pode causar dano direto ao boss\n\n\n"
+                    "Clique para comecar o combate final!"
+                );
+                window.draw(storyText);
+                
+                // Desenhar retrato do boss
+                bossPortrait.setPosition(650, 400);
+                bossPortrait.setScale(0.035f, 0.035f);
+                window.draw(bossPortrait);
+                
                 window.display();
                 continue;
             }
@@ -1375,8 +1574,37 @@ public:
             }
             renderPowerUps();
             
-            window.draw(scoreText);
-            window.draw(phaseText);
+            // Reposicionar textos na fase do boss
+            if (inBossFight) {
+                // Salvar posições originais
+                Vector2f originalScorePos = scoreText.getPosition();
+                Vector2f originalComboPos = comboText.getPosition();
+                Vector2f originalPhasePos = phaseText.getPosition();
+
+                // Calcular novas posições no canto superior direito
+                FloatRect scoreBounds = scoreText.getLocalBounds();
+                FloatRect comboBounds = comboText.getLocalBounds();
+                FloatRect phaseBounds = phaseText.getLocalBounds();
+
+                // Ajustar as posições para o canto direito
+                float rightMargin = 20.0f; // 20 pixels da borda direita
+                scoreText.setPosition(800 - scoreBounds.width - rightMargin, 40);
+                comboText.setPosition(800 - comboBounds.width - rightMargin, 80);
+                phaseText.setPosition(800 - phaseBounds.width - rightMargin, 120);
+
+                window.draw(scoreText);
+                window.draw(comboText);
+                window.draw(phaseText); // Desenhar a fase também
+
+                // Restaurar posições originais
+                scoreText.setPosition(originalScorePos);
+                comboText.setPosition(originalComboPos);
+                phaseText.setPosition(originalPhasePos);
+            } else {
+                window.draw(scoreText);
+                window.draw(phaseText);
+                window.draw(comboText);
+            }
             
             // Não mostrar reputação na fase do boss
             if (!inBossFight) {
@@ -1384,8 +1612,6 @@ public:
                 window.draw(reputationBarBack);
                 window.draw(reputationBar);
             }
-            
-            window.draw(comboText);
             
             if (comboBoostMultiplier > 1.0f) {
                 window.draw(comboMultiplierText);
