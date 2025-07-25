@@ -169,6 +169,9 @@ private:
     Texture soundOnTex, soundOffTex;
     Sprite soundIcon;
     bool soundMuted = false;
+    RectangleShape volumeBar;
+    RectangleShape volumeFill;
+    bool volumeDragging = false;
 
     // --- Adicione estas variáveis na sua classe Game ---
     Texture bgCommunity, bgIndustrial, bgMegacenter, bgBoss;
@@ -177,6 +180,7 @@ private:
     Sprite playerPortrait, bossPortrait; // Sprites para retratos
     bool inLevelTransition = false;
     bool inIntroStory = true; // Nova tela de introdução
+    bool clickedToTransition = false;
     bool inBossIntro = false; // Introdução para o boss
     RectangleShape continueButton;
     Text continueButtonText;
@@ -286,6 +290,7 @@ public:
         } else {
             bgMusic.setLoop(true);
             bgMusic.play();
+            bgMusic.setVolume(70); // Volume padrão
         }
 
         // Carregar texturas dos ícones de som
@@ -298,6 +303,15 @@ public:
         soundIcon.setTexture(soundOnTex);
         soundIcon.setScale(0.08f, 0.08f);
         soundIcon.setPosition(730, 20);
+
+        // Configurar barra de volume
+        volumeBar.setSize(Vector2f(100, 10));
+        volumeBar.setFillColor(Color(100, 100, 100));
+        volumeBar.setPosition(550, 30);
+        
+        volumeFill.setSize(Vector2f(70, 10)); // 70% de volume inicial
+        volumeFill.setFillColor(Color(0, 200, 0));
+        volumeFill.setPosition(550, 30);
 
         // Carregar backgrounds
         if (!bgCommunity.loadFromFile("assets/textures/bg_community.png")) {
@@ -429,16 +443,16 @@ public:
         phaseText.setFillColor(Color::White);
         phaseText.setPosition(20, 60);
 
-        reputationText.setFont(font);
-        reputationText.setCharacterSize(20);
-        reputationText.setFillColor(Color::White);
-        reputationText.setPosition(580, 20);
-
         messageText.setFont(font);
         messageText.setCharacterSize(30);
         messageText.setFillColor(Color::Red);
         messageText.setPosition(200, 250);
         messageText.setStyle(Text::Bold);
+
+        reputationText.setFont(font);
+        reputationText.setCharacterSize(20);
+        reputationText.setFillColor(Color::White);
+        reputationText.setPosition(580, 20);
 
         comboText.setFont(font);
         comboText.setCharacterSize(24);
@@ -1132,7 +1146,6 @@ public:
         inventory.clear();
         inLevelTransition = false;
         inDefeatScreen = false;
-        inIntroStory = true; // Reinicia com a história
         inBossIntro = false;
         timeFreezeFactor = 1.0f;
         timeFreezeDuration = 0.0f;
@@ -1359,7 +1372,7 @@ public:
                                 powerUpSound.setVolume(0);
                                 soundIcon.setTexture(soundOffTex);
                             } else {
-                                bgMusic.setVolume(100);
+                                bgMusic.setVolume(70);
                                 sound.setVolume(100);
                                 victorySound.setVolume(100);
                                 defeatSound.setVolume(100);
@@ -1367,7 +1380,15 @@ public:
                                 soundIcon.setTexture(soundOnTex);
                             }
                         }
-                        if (startButton.getGlobalBounds().contains(mousePos)) {
+                        // Controle de volume
+                        else if (volumeBar.getGlobalBounds().contains(mousePos)) {
+                            float volumePercent = (mousePos.x - volumeBar.getPosition().x) / volumeBar.getSize().x * 100.0f;
+                            volumePercent = max(0.0f, min(100.0f, volumePercent));
+                            volumeFill.setSize(Vector2f(volumePercent * volumeBar.getSize().x / 100.0f, 10));
+                            bgMusic.setVolume(volumePercent);
+                            volumeDragging = true;
+                        }
+                        else if (startButton.getGlobalBounds().contains(mousePos)) {
                             inStartScreen = false;
                             resetGame();
                             bgMusic.play();
@@ -1375,9 +1396,22 @@ public:
                     }
                 }
                 
-                // Tela de história inicial
+                // Arrastar controle de volume
+                if (inStartScreen && volumeDragging && event.type == Event::MouseMoved) {
+                    Vector2f mousePos(event.mouseMove.x, event.mouseMove.y);
+                    float volumePercent = (mousePos.x - volumeBar.getPosition().x) / volumeBar.getSize().x * 100.0f;
+                    volumePercent = max(0.0f, min(100.0f, volumePercent));
+                    volumeFill.setSize(Vector2f(volumePercent * volumeBar.getSize().x / 100.0f, 10));
+                    bgMusic.setVolume(volumePercent);
+                }
+                
+                if (event.type == Event::MouseButtonReleased) {
+                    volumeDragging = false;
+                }
+
+                
                 if (inIntroStory && event.type == Event::MouseButtonPressed) {
-                    if (event.mouseButton.button == Mouse::Left) {
+                    if (event.mouseButton.button == Mouse::Right) {
                         inIntroStory = false;
                     }
                 }
@@ -1465,6 +1499,20 @@ public:
                 window.draw(startButton);
                 window.draw(startButtonText);
                 window.draw(soundIcon);
+                
+                // Desenhar barra de volume
+                window.draw(volumeBar);
+                window.draw(volumeFill);
+                
+                // Texto de volume
+                Text volumeText;
+                volumeText.setFont(font);
+                volumeText.setString("Volume");
+                volumeText.setCharacterSize(16);
+                volumeText.setFillColor(Color::White);
+                volumeText.setPosition(550, 10);
+                window.draw(volumeText);
+                
                 window.display();
                 continue;
             }
@@ -1485,7 +1533,7 @@ public:
                 // Texto da história
                 storyText.setString(
                     "Bem-vindo ao Gerenciador de Reciclagem!\n\n"
-                    "Voce e o novo diretor de sustentabilidade da cidade.\n"
+                    "Voce e o novo coletor de lixo da cidade.\n"
                     "Nosso planeta esta sendo sufocado por residuos,\n"
                     "e cabe a voce organizar a coleta seletiva.\n\n"
                     "Sua missao:\n"
@@ -1493,7 +1541,7 @@ public:
                     "dos caminhoes de coleta antes que poluam a cidade.\n\n"
                     "Cada acerto aumenta sua reputacao e pontos.\n"
                     "Erros ou residuos perdidos diminuem sua reputacao.\n\n"
-                    "Clique para comecar sua jornada!"
+                    "Clique com o botão direito do mouse para comecar sua jornada!"
                 );
                 window.draw(storyText);
                 
