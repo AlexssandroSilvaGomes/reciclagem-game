@@ -12,6 +12,10 @@
 #include <thread>
 #include <iomanip>
 
+#define MOBILE_RESOLUTION_X 720
+#define MOBILE_RESOLUTION_Y 1280
+#define TOUCH_THRESHOLD 10.0f
+
 using namespace sf;
 using namespace std;
 
@@ -46,8 +50,8 @@ public:
 
     Waste(Texture& texture, WasteType t, int phase = 0) : type(t), active(true) {
         sprite.setTexture(texture);
-        sprite.setScale(0.12f, 0.12f);
-        sprite.setPosition(rand() % 600, -50);
+        sprite.setScale(0.18f, 0.18f); // Aumentado para mobile
+        sprite.setPosition(rand() % (MOBILE_RESOLUTION_X - 100), -50);
         // Velocidade ajustada: base 1.5 + 0.4 * fase + aleatório
         velocity = Vector2f(0, 1.5f + phase * 0.4f + (rand() % 10) * 0.08f);
         sprite.setColor(Color::White);
@@ -57,7 +61,7 @@ public:
     // Retorna true se passou do limite
     bool update(float speedFactor = 1.0f) {
         sprite.move(velocity * speedFactor);
-        if (sprite.getPosition().y > 600) {
+        if (sprite.getPosition().y > MOBILE_RESOLUTION_Y - 200) {
             active = false;
             return true;
         }
@@ -83,14 +87,14 @@ public:
 
     PowerUp(Texture& texture, Type t) : type(t), active(true), lifetime(10.0f) {
         sprite.setTexture(texture);
-        sprite.setScale(0.08f, 0.08f); // Reduz o tamanho do power-up
-        sprite.setPosition(rand() % 600, -50);
+        sprite.setScale(0.12f, 0.12f); // Aumentado para mobile
+        sprite.setPosition(rand() % (MOBILE_RESOLUTION_X - 100), -50);
 
-        // Configurar o efeito de brilho
-        glowEffect.setRadius(32.0f);
+        // Configurar o efeito de brilho (aumentado para touch)
+        glowEffect.setRadius(48.0f);
         glowEffect.setFillColor(Color(255, 255, 255, 100)); // Semi-transparente
-        glowEffect.setOrigin(32.0f, 32.0f); // Centraliza o brilho
-        glowEffect.setPosition(sprite.getPosition().x + 25, sprite.getPosition().y + 25);
+        glowEffect.setOrigin(48.0f, 48.0f); // Centraliza o brilho
+        glowEffect.setPosition(sprite.getPosition().x + 35, sprite.getPosition().y + 35);
 
         // Centralizar o sprite no glowEffect
         FloatRect spriteBounds = sprite.getLocalBounds();
@@ -108,7 +112,7 @@ public:
         glowEffect.setFillColor(Color(255, 255, 255, alpha));
 
         lifetime -= deltaTime;
-        if (lifetime <= 0 || sprite.getPosition().y > 600) {
+        if (lifetime <= 0 || sprite.getPosition().y > MOBILE_RESOLUTION_Y - 200) {
             active = false;
             return true; // Indica que o power-up deve ser removido
         }
@@ -119,12 +123,13 @@ public:
 class Game {
 private:
     RenderWindow window;
+    Vector2f touchStartPosition;
     vector<Texture> wasteTextures;
     vector<Waste> activeWastes;
     vector<Sprite> bins;
     vector<Text> binLabels;
     map<WasteType, FloatRect> binBounds;
-    map<WasteType, Texture> binTextures; // Armazena texturas permanentemente
+    map<WasteType, Texture> binTextures; 
 
     Font font;
     Text scoreText;
@@ -217,7 +222,7 @@ private:
     // Novas variáveis para o texto de feedback de power-ups
     float powerUpTextTimer = 0.0f;
     float powerUpTextAlpha = 255.0f;
-    float powerUpTextY = 250.0f;
+    float powerUpTextY = MOBILE_RESOLUTION_Y / 2;
 
     // --- Novas variáveis para a fase do boss ---
     bool inBossFight = false;
@@ -231,7 +236,7 @@ private:
 
 public:
     // --- No construtor ---
-    Game() : window(VideoMode(800, 600), "Gerenciador de Reciclagem"), 
+    Game() : window(VideoMode(MOBILE_RESOLUTION_X, MOBILE_RESOLUTION_Y), "Gerenciador de Reciclagem"), 
               score(0), reputation(100), phase(0), combo(0), spawnTimer(0), 
               gameTimer(0), eventTimer(0), specialEvent(false), selectedWasteIndex(-1), 
               inStartScreen(true), powerUpSpawnTimer(0), timeFreezeFactor(1.0f),
@@ -265,13 +270,13 @@ public:
         setupBins();
 
         // Configurar barra de reputação
-        reputationBarBack.setSize(Vector2f(200, 20));
+        reputationBarBack.setSize(Vector2f(MOBILE_RESOLUTION_X * 0.3f, 25));
         reputationBarBack.setFillColor(Color(50, 50, 50));
-        reputationBarBack.setPosition(580, 50);
+        reputationBarBack.setPosition(MOBILE_RESOLUTION_X * 0.65f, 80);
         
-        reputationBar.setSize(Vector2f(200, 20));
+        reputationBar.setSize(Vector2f(MOBILE_RESOLUTION_X * 0.3f, 25));
         reputationBar.setFillColor(Color(0, 200, 0));
-        reputationBar.setPosition(580, 50);
+        reputationBar.setPosition(MOBILE_RESOLUTION_X * 0.65f, 80);
 
         // Carregar sons
         if (!correctBuffer.loadFromFile("assets/sounds/correct.wav")) {
@@ -301,17 +306,17 @@ public:
             cerr << "Erro ao carregar sound_off.png" << endl;
         }
         soundIcon.setTexture(soundOnTex);
-        soundIcon.setScale(0.08f, 0.08f);
-        soundIcon.setPosition(730, 20);
+        soundIcon.setScale(0.12f, 0.12f);
+        soundIcon.setPosition(MOBILE_RESOLUTION_X - 80, 30);
 
         // Configurar barra de volume
-        volumeBar.setSize(Vector2f(100, 10));
+        volumeBar.setSize(Vector2f(150, 15));
         volumeBar.setFillColor(Color(100, 100, 100));
-        volumeBar.setPosition(550, 30);
+        volumeBar.setPosition(50, 30);
         
-        volumeFill.setSize(Vector2f(70, 10)); // 70% de volume inicial
+        volumeFill.setSize(Vector2f(105, 15)); // 70% de volume inicial
         volumeFill.setFillColor(Color(0, 200, 0));
-        volumeFill.setPosition(550, 30);
+        volumeFill.setPosition(50, 30);
 
         // Carregar backgrounds
         if (!bgCommunity.loadFromFile("assets/textures/bg_community.png")) {
@@ -344,7 +349,7 @@ public:
             delete[] pixels;
         }
         playerPortrait.setTexture(playerPortraitTex);
-        playerPortrait.setScale(0.035f, 0.035f);
+        playerPortrait.setScale(0.05f, 0.05f);
         
         if (!bossPortraitTex.loadFromFile("assets/textures/boss_portrait.png")) {
             cerr << "Erro ao carregar boss_portrait.png" << endl;
@@ -363,40 +368,47 @@ public:
         }
         bossPortrait.setTexture(bossPortraitTex);
         if(!inBossIntro) {
-            bossPortrait.setScale(0.035f, 0.035f);
+            bossPortrait.setScale(0.05f, 0.05f);
         }
         
         bgSprite.setTexture(bgCommunity); // Começa na fase 1
+        bgSprite.setScale(
+            static_cast<float>(MOBILE_RESOLUTION_X) / bgSprite.getLocalBounds().width,
+            static_cast<float>(MOBILE_RESOLUTION_Y) / bgSprite.getLocalBounds().height
+        );
 
-        // Botão de continuar
-        continueButton.setSize(Vector2f(220, 60));
+        // Botão de continuar (maior para touch)
+        continueButton.setSize(Vector2f(MOBILE_RESOLUTION_X * 0.6f, 100));
         continueButton.setFillColor(Color(70, 130, 180));
-        continueButton.setPosition(290, 350);
+        continueButton.setPosition(MOBILE_RESOLUTION_X * 0.2f, MOBILE_RESOLUTION_Y * 0.7f);
 
         continueButtonText.setFont(font);
         continueButtonText.setString("Continuar");
-        continueButtonText.setCharacterSize(28);
+        continueButtonText.setCharacterSize(36);
         continueButtonText.setFillColor(Color::White);
         FloatRect btnTextBounds = continueButtonText.getLocalBounds();
-        continueButtonText.setPosition(400 - btnTextBounds.width / 2, 365);
+        continueButtonText.setPosition(
+            MOBILE_RESOLUTION_X / 2 - btnTextBounds.width / 2,
+            MOBILE_RESOLUTION_Y * 0.7f + 35
+        );
 
         levelInfoText.setFont(font);
-        levelInfoText.setCharacterSize(32);
+        levelInfoText.setCharacterSize(36);
         levelInfoText.setFillColor(Color::White);
         levelInfoText.setStyle(Text::Bold);
-        levelInfoText.setPosition(120, 180);
+        levelInfoText.setPosition(50, MOBILE_RESOLUTION_Y * 0.3f);
 
         // Configurar painel e texto para história
-        storyPanel.setSize(Vector2f(700, 420));
+        storyPanel.setSize(Vector2f(MOBILE_RESOLUTION_X * 0.9f, MOBILE_RESOLUTION_Y * 0.7f));
         storyPanel.setFillColor(Color(0, 0, 0, 180));
         storyPanel.setOutlineColor(Color::White);
         storyPanel.setOutlineThickness(2);
-        storyPanel.setPosition(50, 100);
+        storyPanel.setPosition(MOBILE_RESOLUTION_X * 0.05f, MOBILE_RESOLUTION_Y * 0.15f);
         
         storyText.setFont(font);
-        storyText.setCharacterSize(22);
+        storyText.setCharacterSize(28);
         storyText.setFillColor(Color::White);
-        storyText.setPosition(80, 120);
+        storyText.setPosition(MOBILE_RESOLUTION_X * 0.1f, MOBILE_RESOLUTION_Y * 0.2f);
 
         // Carregar sons de vitória e derrota
         if (!victoryBuffer.loadFromFile("assets/sounds/victory.mp3")) {
@@ -410,79 +422,82 @@ public:
         defeatSound.setBuffer(defeatBuffer);
 
         // Configurar barras de vida para o boss fight
-        // Reduzir o tamanho para 600px
-        playerLifeBarBack.setSize(Vector2f(600, 20));
+        playerLifeBarBack.setSize(Vector2f(MOBILE_RESOLUTION_X * 0.8f, 30));
         playerLifeBarBack.setFillColor(Color(200, 200, 200)); // Fundo cinza
         playerLifeBarBack.setOutlineColor(Color::Black);
         playerLifeBarBack.setOutlineThickness(2);
-        playerLifeBarBack.setPosition(100, 570); // Reposicionado
+        playerLifeBarBack.setPosition(MOBILE_RESOLUTION_X * 0.1f, MOBILE_RESOLUTION_Y * 0.9f);
         
-        playerLifeBar.setSize(Vector2f(600, 20));
+        playerLifeBar.setSize(Vector2f(MOBILE_RESOLUTION_X * 0.8f, 30));
         playerLifeBar.setFillColor(Color::Green);
-        playerLifeBar.setPosition(100, 570); // Reposicionado
+        playerLifeBar.setPosition(MOBILE_RESOLUTION_X * 0.1f, MOBILE_RESOLUTION_Y * 0.9f);
 
-        bossLifeBarBack.setSize(Vector2f(600, 20));
+        bossLifeBarBack.setSize(Vector2f(MOBILE_RESOLUTION_X * 0.8f, 30));
         bossLifeBarBack.setFillColor(Color(200, 200, 200)); // Fundo cinza
         bossLifeBarBack.setOutlineColor(Color::Black);
         bossLifeBarBack.setOutlineThickness(2);
-        bossLifeBarBack.setPosition(100, 10); // Reposicionado
+        bossLifeBarBack.setPosition(MOBILE_RESOLUTION_X * 0.1f, 50);
         
-        bossLifeBar.setSize(Vector2f(600, 20));
+        bossLifeBar.setSize(Vector2f(MOBILE_RESOLUTION_X * 0.8f, 30));
         bossLifeBar.setFillColor(Color::Red);
-        bossLifeBar.setPosition(100, 10); // Reposicionado
+        bossLifeBar.setPosition(MOBILE_RESOLUTION_X * 0.1f, 50);
     }
 
     void setupTexts() {
         scoreText.setFont(font);
-        scoreText.setCharacterSize(24);
+        scoreText.setCharacterSize(36);
         scoreText.setFillColor(Color::White);
         scoreText.setPosition(20, 20);
 
         phaseText.setFont(font);
-        phaseText.setCharacterSize(24);
+        phaseText.setCharacterSize(32);
         phaseText.setFillColor(Color::White);
-        phaseText.setPosition(20, 60);
+        phaseText.setPosition(20, 70);
 
         messageText.setFont(font);
-        messageText.setCharacterSize(30);
+        messageText.setCharacterSize(42);
         messageText.setFillColor(Color::Red);
-        messageText.setPosition(200, 250);
+        messageText.setPosition(MOBILE_RESOLUTION_X / 2, MOBILE_RESOLUTION_Y / 2);
         messageText.setStyle(Text::Bold);
+        messageText.setOrigin(messageText.getLocalBounds().width / 2, 0);
 
         reputationText.setFont(font);
-        reputationText.setCharacterSize(20);
+        reputationText.setCharacterSize(32);
         reputationText.setFillColor(Color::White);
-        reputationText.setPosition(580, 20);
+        reputationText.setPosition(MOBILE_RESOLUTION_X * 0.65f, 40);
 
         comboText.setFont(font);
-        comboText.setCharacterSize(24);
+        comboText.setCharacterSize(36);
         comboText.setFillColor(Color::White);
-        comboText.setPosition(20, 100);
+        comboText.setPosition(20, 120);
 
         comboMultiplierText.setFont(font);
-        comboMultiplierText.setCharacterSize(24);
+        comboMultiplierText.setCharacterSize(36);
         comboMultiplierText.setFillColor(Color::Yellow);
         comboMultiplierText.setStyle(Text::Bold);
-        comboMultiplierText.setPosition(150, 100);
+        comboMultiplierText.setPosition(150, 120);
 
         // Configurações para a tela inicial
         gameTitle.setFont(font);
         gameTitle.setString("Gerenciador de Reciclagem");
-        gameTitle.setCharacterSize(40);
+        gameTitle.setCharacterSize(48);
         gameTitle.setFillColor(Color::White);
         FloatRect titleBounds = gameTitle.getLocalBounds();
-        gameTitle.setPosition(400 - titleBounds.width / 2, 120);
+        gameTitle.setPosition(MOBILE_RESOLUTION_X / 2 - titleBounds.width / 2, MOBILE_RESOLUTION_Y * 0.2f);
 
-        startButton.setSize(Vector2f(220, 60));
+        startButton.setSize(Vector2f(MOBILE_RESOLUTION_X * 0.6f, 120));
         startButton.setFillColor(Color(70, 130, 180));
-        startButton.setPosition(290, 300);
+        startButton.setPosition(MOBILE_RESOLUTION_X * 0.2f, MOBILE_RESOLUTION_Y * 0.5f);
 
         startButtonText.setFont(font);
         startButtonText.setString("Comecar");
-        startButtonText.setCharacterSize(28);
+        startButtonText.setCharacterSize(42);
         startButtonText.setFillColor(Color::White);
         FloatRect btnTextBounds = startButtonText.getLocalBounds();
-        startButtonText.setPosition(400 - btnTextBounds.width / 2, 315);
+        startButtonText.setPosition(
+            MOBILE_RESOLUTION_X / 2 - btnTextBounds.width / 2,
+            MOBILE_RESOLUTION_Y * 0.5f + 40
+        );
     }
 
     void loadTextures() {
@@ -597,13 +612,13 @@ public:
             binTypes = {PAPER, PLASTIC, METAL, GLASS, ORGANIC, ELECTRONIC, BATTERY};
         }
 
-        float binWidth = 70.0f;
-        float spacing = (800.0f - (binWidth * binTypes.size())) / (binTypes.size() + 1);
+        float binWidth = 100.0f; // Aumentado para mobile
+        float spacing = (MOBILE_RESOLUTION_X - (binWidth * binTypes.size())) / (binTypes.size() + 1);
 
         // Ajuste da posição Y: na fase do boss, subir as lixeiras
-        float binY = 500.0f;
+        float binY = MOBILE_RESOLUTION_Y - 250.0f; // Posicionado mais alto
         if (phase == BOSS) {
-            binY = 450.0f;
+            binY = MOBILE_RESOLUTION_Y - 300.0f;
         }
 
         for (int i = 0; i < binTypes.size(); i++) {
@@ -616,11 +631,18 @@ public:
 
             Sprite bin;
             bin.setTexture(binTextures[type]);
-            bin.setScale(0.2f, 0.2f);
+            bin.setScale(0.25f, 0.25f); // Aumentado para mobile
             float x = spacing + i * (binWidth + spacing);
             bin.setPosition(x, binY); // Usando binY
             bins.push_back(bin);
-            binBounds[type] = bin.getGlobalBounds();
+            
+            // Aumentar área de toque
+            FloatRect bounds = bin.getGlobalBounds();
+            bounds.left -= 15;
+            bounds.top -= 15;
+            bounds.width += 30;
+            bounds.height += 30;
+            binBounds[type] = bounds;
 
             // Nome da lixeira
             string label;
@@ -637,9 +659,9 @@ public:
             Text text;
             text.setFont(font);
             text.setString(label);
-            text.setCharacterSize(14);
+            text.setCharacterSize(24); // Aumentado para mobile
             text.setFillColor(Color::White);
-            text.setPosition(x + (binWidth * 0.1f), binY + 70); // Ajuste em Y também
+            text.setPosition(x + (binWidth * 0.1f), binY + 100); // Ajuste em Y também
             binLabels.push_back(text);
         }
     }
@@ -815,7 +837,7 @@ public:
         ss << "Reputacao: " << reputation << "%";
         reputationText.setString(ss.str());
         
-        reputationBar.setSize(Vector2f(2.0f * reputation, 20));
+        reputationBar.setSize(Vector2f(MOBILE_RESOLUTION_X * 0.3f * reputation / 100.0f, 25));
         
         // Atualizar combo text
         ss.str("");
@@ -825,7 +847,7 @@ public:
         ss.str("");
         ss << "x" << fixed << setprecision(1) << comboBoostMultiplier;
         comboMultiplierText.setString(ss.str());
-        comboMultiplierText.setPosition(150 + comboText.getLocalBounds().width, 100);
+        comboMultiplierText.setPosition(150 + comboText.getLocalBounds().width, 120);
         
         // Atualizar mensagens temporárias e animação do texto de power-up
         if (!messageText.getString().isEmpty()) {
@@ -840,13 +862,13 @@ public:
                     messageText.getFillColor().b,
                     static_cast<Uint8>(powerUpTextAlpha)
                 ));
-                messageText.setPosition(400 - messageText.getLocalBounds().width / 2, powerUpTextY);
+                messageText.setPosition(MOBILE_RESOLUTION_X / 2, powerUpTextY);
             }
             if (powerUpTextTimer > 1.5f) {
                 messageText.setString(""); // Limpa após 1.5 segundos
                 powerUpTextTimer = 0.0f;
                 powerUpTextAlpha = 255.0f;
-                powerUpTextY = 250.0f;
+                powerUpTextY = MOBILE_RESOLUTION_Y / 2;
             }
         }
 
@@ -940,11 +962,18 @@ public:
         }
     }
 
-    void handleClick(Vector2f mousePos) {
+    void handleClick(Vector2f touchPos) {
         // Se nenhum lixo está selecionado, procura por um para selecionar
         if (selectedWasteIndex == -1) {
             for (size_t i = 0; i < activeWastes.size(); ++i) {
-                if (activeWastes[i].sprite.getGlobalBounds().contains(mousePos)) {
+                // Aumentar área de toque para resíduos
+                FloatRect bounds = activeWastes[i].sprite.getGlobalBounds();
+                bounds.left -= 20;
+                bounds.top -= 20;
+                bounds.width += 40;
+                bounds.height += 40;
+                
+                if (bounds.contains(touchPos)) {
                     selectedWasteIndex = static_cast<int>(i);
                     activeWastes[i].sprite.setColor(Color(255, 255, 0));
                     sound.setBuffer(selectBuffer);
@@ -958,7 +987,14 @@ public:
             bool clickedAnotherWaste = false;
             // Verifica se clicou em outro lixo
             for (size_t i = 0; i < activeWastes.size(); ++i) {
-                if (activeWastes[i].sprite.getGlobalBounds().contains(mousePos)) {
+                // Aumentar área de toque para resíduos
+                FloatRect bounds = activeWastes[i].sprite.getGlobalBounds();
+                bounds.left -= 20;
+                bounds.top -= 20;
+                bounds.width += 40;
+                bounds.height += 40;
+                
+                if (bounds.contains(touchPos)) {
                     // Remove destaque do anterior
                     if (selectedWasteIndex >= 0 && selectedWasteIndex < static_cast<int>(activeWastes.size())) {
                         activeWastes[selectedWasteIndex].sprite.setColor(Color::White);
@@ -978,7 +1014,7 @@ public:
                 WasteType selectedType = activeWastes[selectedWasteIndex].type;
 
                 for (const auto& bin : binBounds) {
-                    if (bin.second.contains(mousePos)) {
+                    if (bin.second.contains(touchPos)) {
                         clickedBin = true;
                         bool correct = (bin.first == selectedType);
 
@@ -1048,10 +1084,10 @@ public:
         }
     }
 
-    void handlePowerUpClick(Vector2f mousePos) {
+    void handlePowerUpClick(Vector2f touchPos) {
         for (size_t i = 0; i < activePowerUps.size(); ++i) {
             // Verifica se o clique foi no efeito de brilho (maior e mais fácil de clicar)
-            if (activePowerUps[i].glowEffect.getGlobalBounds().contains(mousePos)) {
+            if (activePowerUps[i].glowEffect.getGlobalBounds().contains(touchPos)) {
                 if (activePowerUps[i].type == PowerUp::BOSS_DAMAGE && inBossFight) {
                     bossLife = max(0, bossLife - 25); // Aumenta o dano ao boss
                     messageText.setString("Ataque no Boss! -25 HP");
@@ -1079,10 +1115,9 @@ public:
         }
 
         // Ajusta o tamanho do background para preencher a janela
-        IntRect texRect = bgSprite.getTextureRect();
         bgSprite.setScale(
-            800.f / texRect.width,
-            600.f / texRect.height
+            static_cast<float>(MOBILE_RESOLUTION_X) / bgSprite.getLocalBounds().width,
+            static_cast<float>(MOBILE_RESOLUTION_Y) / bgSprite.getLocalBounds().height
         );
     }
 
@@ -1111,19 +1146,19 @@ public:
     void renderDefeatScreen() {
         window.clear(Color(30, 0, 0));
         // Fundo escuro
-        RectangleShape overlay(Vector2f(800, 600));
+        RectangleShape overlay(Vector2f(MOBILE_RESOLUTION_X, MOBILE_RESOLUTION_Y));
         overlay.setFillColor(Color(0, 0, 0, 200));
         window.draw(bgSprite);
         window.draw(overlay);
 
         Text defeatText;
         defeatText.setFont(font);
-        defeatText.setString("Derrota!\nSua reputacao chegou a zero.\nClique para voltar ao menu.");
-        defeatText.setCharacterSize(32);
+        defeatText.setString("Derrota!\nSua reputacao chegou a zero.\nToque para voltar ao menu.");
+        defeatText.setCharacterSize(42);
         defeatText.setFillColor(Color::Red);
         defeatText.setStyle(Text::Bold);
-        FloatRect bounds = defeatText.getLocalBounds();
-        defeatText.setPosition(400 - bounds.width / 2, 220);
+        defeatText.setOrigin(defeatText.getLocalBounds().width / 2, 0);
+        defeatText.setPosition(MOBILE_RESOLUTION_X / 2, MOBILE_RESOLUTION_Y * 0.3f);
         window.draw(defeatText);
 
         window.display();
@@ -1198,36 +1233,37 @@ public:
                 break;
         }
         messageText.setStyle(Text::Bold);
-        messageText.setPosition(400 - messageText.getLocalBounds().width / 2, powerUpTextY);
+        messageText.setOrigin(messageText.getLocalBounds().width / 2, 0);
+        messageText.setPosition(MOBILE_RESOLUTION_X / 2, powerUpTextY);
         powerUpTextTimer = 0.0f;
         powerUpTextAlpha = 255.0f;
-        powerUpTextY = 250.0f;
+        powerUpTextY = MOBILE_RESOLUTION_Y / 2;
         comboClock.restart();
     }
 
     void renderActivePowerUpEffects() {
-        float x = 650;
-        float y = 100;
-        float spacing = 50;
+        float x = MOBILE_RESOLUTION_X * 0.8f;
+        float y = 150;
+        float spacing = 60;
 
         // Time Freeze
         if (timeFreezeDuration > 0) {
             Sprite icon;
             icon.setTexture(powerUpTextures[PowerUp::TIME_FREEZE]);
-            icon.setScale(0.06f, 0.06f);
+            icon.setScale(0.08f, 0.08f);
             icon.setPosition(x, y);
             window.draw(icon);
 
             // Barra de tempo
-            RectangleShape barBack(Vector2f(40, 5));
+            RectangleShape barBack(Vector2f(60, 8));
             barBack.setFillColor(Color(50,50,50));
-            barBack.setPosition(x + 50, y + 25);
+            barBack.setPosition(x + 70, y + 30);
             window.draw(barBack);
 
             float ratio = timeFreezeDuration / 5.0f;
-            RectangleShape bar(Vector2f(40 * ratio, 5));
+            RectangleShape bar(Vector2f(60 * ratio, 8));
             bar.setFillColor(Color::Cyan);
-            bar.setPosition(x + 50, y + 25);
+            bar.setPosition(x + 70, y + 30);
             window.draw(bar);
             
             y += spacing;
@@ -1237,29 +1273,29 @@ public:
         if (comboBoostDuration > 0) {
             Sprite icon;
             icon.setTexture(powerUpTextures[PowerUp::COMBO_BOOST]);
-            icon.setScale(0.06f, 0.06f);
+            icon.setScale(0.08f, 0.08f);
             icon.setPosition(x, y);
             window.draw(icon);
 
             // Barra de tempo
-            RectangleShape barBack(Vector2f(40, 5));
+            RectangleShape barBack(Vector2f(60, 8));
             barBack.setFillColor(Color(50,50,50));
-            barBack.setPosition(x + 50, y + 25);
+            barBack.setPosition(x + 70, y + 30);
             window.draw(barBack);
 
             float ratio = comboBoostDuration / 10.0f;
-            RectangleShape bar(Vector2f(40 * ratio, 5));
+            RectangleShape bar(Vector2f(60 * ratio, 8));
             bar.setFillColor(Color::Yellow);
-            bar.setPosition(x + 50, y + 25);
+            bar.setPosition(x + 70, y + 30);
             window.draw(bar);
             
             // Multiplicador
             Text multText;
             multText.setFont(font);
             multText.setString("x" + to_string(static_cast<int>(comboBoostMultiplier)));
-            multText.setCharacterSize(20);
+            multText.setCharacterSize(30);
             multText.setFillColor(Color::Yellow);
-            multText.setPosition(x + 100, y);
+            multText.setPosition(x + 140, y);
             window.draw(multText);
             
             y += spacing;
@@ -1269,20 +1305,20 @@ public:
         if (magnetActive) {
             Sprite icon;
             icon.setTexture(powerUpTextures[PowerUp::MAGNET]);
-            icon.setScale(0.06f, 0.06f);
+            icon.setScale(0.08f, 0.08f);
             icon.setPosition(x, y);
             window.draw(icon);
 
             // Barra de tempo
-            RectangleShape barBack(Vector2f(40, 5));
+            RectangleShape barBack(Vector2f(60, 8));
             barBack.setFillColor(Color(50,50,50));
-            barBack.setPosition(x + 50, y + 25);
+            barBack.setPosition(x + 70, y + 30);
             window.draw(barBack);
 
             float ratio = magnetDuration / 5.0f;
-            RectangleShape bar(Vector2f(40 * ratio, 5));
+            RectangleShape bar(Vector2f(60 * ratio, 8));
             bar.setFillColor(Color::Green);
-            bar.setPosition(x + 50, y + 25);
+            bar.setPosition(x + 70, y + 30);
             window.draw(bar);
             
             y += spacing;
@@ -1292,7 +1328,7 @@ public:
         if (shieldCount > 0) {
             Sprite icon;
             icon.setTexture(powerUpTextures[PowerUp::SHIELD]);
-            icon.setScale(0.06f, 0.06f);
+            icon.setScale(0.08f, 0.08f);
             icon.setPosition(x, y);
             window.draw(icon);
 
@@ -1300,10 +1336,10 @@ public:
             Text countText;
             countText.setFont(font);
             countText.setString(to_string(shieldCount));
-            countText.setCharacterSize(24);
+            countText.setCharacterSize(36);
             countText.setFillColor(Color::Blue);
             countText.setStyle(Text::Bold);
-            countText.setPosition(x + 40, y - 5);
+            countText.setPosition(x + 60, y - 10);
             window.draw(countText);
         }
     }
@@ -1311,8 +1347,8 @@ public:
     void renderLifeBars() {
         if (inBossFight) {
             // Atualiza tamanho das barras
-            playerLifeBar.setSize(Vector2f(600.0f * playerLife / 100.0f, 20));
-            bossLifeBar.setSize(Vector2f(600.0f * bossLife / 100.0f, 20));
+            playerLifeBar.setSize(Vector2f(MOBILE_RESOLUTION_X * 0.8f * playerLife / 100.0f, 30));
+            bossLifeBar.setSize(Vector2f(MOBILE_RESOLUTION_X * 0.8f * bossLife / 100.0f, 30));
             
             // Desenha fundos
             window.draw(playerLifeBarBack);
@@ -1323,29 +1359,29 @@ public:
             window.draw(playerLifeBar);
             
             // Desenha retratos ao lado das barras
-            bossPortrait.setPosition(30, 10); // Reposicionado
+            bossPortrait.setPosition(30, 40);
             window.draw(bossPortrait);
             
-            playerPortrait.setPosition(30, 540); // Reposicionado
+            playerPortrait.setPosition(30, MOBILE_RESOLUTION_Y * 0.9f - 15);
             window.draw(playerPortrait);
             
             // Desenha textos de vida
             Text bossLifeText;
             bossLifeText.setFont(font);
             bossLifeText.setString(to_string(bossLife) + "%");
-            bossLifeText.setCharacterSize(20);
+            bossLifeText.setCharacterSize(30);
             bossLifeText.setFillColor(Color::White);
             bossLifeText.setStyle(Text::Bold);
-            bossLifeText.setPosition(720, 15); // Reposicionado
+            bossLifeText.setPosition(MOBILE_RESOLUTION_X - 100, 55);
             window.draw(bossLifeText);
             
             Text playerLifeText;
             playerLifeText.setFont(font);
             playerLifeText.setString(to_string(playerLife) + "%");
-            playerLifeText.setCharacterSize(20);
+            playerLifeText.setCharacterSize(30);
             playerLifeText.setFillColor(Color::White);
             playerLifeText.setStyle(Text::Bold);
-            playerLifeText.setPosition(720, 565); // Reposicionado
+            playerLifeText.setPosition(MOBILE_RESOLUTION_X - 100, MOBILE_RESOLUTION_Y * 0.9f);
             window.draw(playerLifeText);
         }
     }
@@ -1359,10 +1395,10 @@ public:
                 }
                 
                 // Controle de som na tela inicial
-                if (inStartScreen && event.type == Event::MouseButtonPressed) {
-                    if (event.mouseButton.button == Mouse::Left) {
-                        Vector2f mousePos(event.mouseButton.x, event.mouseButton.y);
-                        if (soundIcon.getGlobalBounds().contains(mousePos)) {
+                if (inStartScreen) {
+                    if (event.type == Event::TouchBegan) {
+                        Vector2f touchPos(event.touch.x, event.touch.y);
+                        if (soundIcon.getGlobalBounds().contains(touchPos)) {
                             soundMuted = !soundMuted;
                             if (soundMuted) {
                                 bgMusic.setVolume(0);
@@ -1381,102 +1417,89 @@ public:
                             }
                         }
                         // Controle de volume
-                        else if (volumeBar.getGlobalBounds().contains(mousePos)) {
-                            float volumePercent = (mousePos.x - volumeBar.getPosition().x) / volumeBar.getSize().x * 100.0f;
+                        else if (volumeBar.getGlobalBounds().contains(touchPos)) {
+                            float volumePercent = (touchPos.x - volumeBar.getPosition().x) / volumeBar.getSize().x * 100.0f;
                             volumePercent = max(0.0f, min(100.0f, volumePercent));
-                            volumeFill.setSize(Vector2f(volumePercent * volumeBar.getSize().x / 100.0f, 10));
+                            volumeFill.setSize(Vector2f(volumePercent * volumeBar.getSize().x / 100.0f, 15));
                             bgMusic.setVolume(volumePercent);
                             volumeDragging = true;
                         }
-                        else if (startButton.getGlobalBounds().contains(mousePos)) {
+                        else if (startButton.getGlobalBounds().contains(touchPos)) {
                             inStartScreen = false;
                             resetGame();
                             bgMusic.play();
                         }
                     }
-                }
-                
-                // Arrastar controle de volume
-                if (inStartScreen && volumeDragging && event.type == Event::MouseMoved) {
-                    Vector2f mousePos(event.mouseMove.x, event.mouseMove.y);
-                    float volumePercent = (mousePos.x - volumeBar.getPosition().x) / volumeBar.getSize().x * 100.0f;
-                    volumePercent = max(0.0f, min(100.0f, volumePercent));
-                    volumeFill.setSize(Vector2f(volumePercent * volumeBar.getSize().x / 100.0f, 10));
-                    bgMusic.setVolume(volumePercent);
-                }
-                
-                if (event.type == Event::MouseButtonReleased) {
-                    volumeDragging = false;
+                    else if (event.type == Event::TouchMoved && volumeDragging) {
+                        Vector2f touchPos(event.touch.x, event.touch.y);
+                        float volumePercent = (touchPos.x - volumeBar.getPosition().x) / volumeBar.getSize().x * 100.0f;
+                        volumePercent = max(0.0f, min(100.0f, volumePercent));
+                        volumeFill.setSize(Vector2f(volumePercent * volumeBar.getSize().x / 100.0f, 15));
+                        bgMusic.setVolume(volumePercent);
+                    }
+                    else if (event.type == Event::TouchEnded) {
+                        volumeDragging = false;
+                    }
                 }
 
                 
-                if (inIntroStory && event.type == Event::MouseButtonPressed) {
-                    if (event.mouseButton.button == Mouse::Right) {
-                        inIntroStory = false;
-                    }
+                if (inIntroStory && event.type == Event::TouchBegan) {
+                    inIntroStory = false;
                 }
                 
                 // Tela de introdução do boss
-                if (inBossIntro && event.type == Event::MouseButtonPressed) {
-                    if (event.mouseButton.button == Mouse::Left) {
-                        inBossIntro = false;
-                        inBossFight = true;
-                    }
+                if (inBossIntro && event.type == Event::TouchBegan) {
+                    inBossIntro = false;
+                    inBossFight = true;
                 }
                 
                 // --- Evento para continuar na tela de transição ---
-                if (inLevelTransition && event.type == Event::MouseButtonPressed) {
-                    if (event.mouseButton.button == Mouse::Left) {
-                        Vector2f mousePos(event.mouseButton.x, event.mouseButton.y);
-                        if (continueButton.getGlobalBounds().contains(mousePos)) {
-                            inLevelTransition = false;
-                            activeWastes.clear();
-                            combo = 0;
-                            selectedWasteIndex = -1;
-                            if (phase == COMMUNITY) {
-                                phase = INDUSTRIAL;
-                                setupBins();
-                                updateBackground();
-                                bgMusic.play();
-                            } else if (phase == INDUSTRIAL) {
-                                phase = MEGACENTER;
-                                setupBins();
-                                updateBackground();
-                                bgMusic.play();
-                            } else if (phase == MEGACENTER) {
-                                phase = BOSS;
-                                setupBins();
-                                updateBackground();
-                                inBossIntro = true; // Mostra introdução antes do boss
-                                bgMusic.play();
-                            } else if (phase == BOSS) {
-                                inStartScreen = true;
-                                resetGame();
-                                bgMusic.play();
-                            }
+                if (inLevelTransition && event.type == Event::TouchBegan) {
+                    Vector2f touchPos(event.touch.x, event.touch.y);
+                    if (continueButton.getGlobalBounds().contains(touchPos)) {
+                        inLevelTransition = false;
+                        activeWastes.clear();
+                        combo = 0;
+                        selectedWasteIndex = -1;
+                        if (phase == COMMUNITY) {
+                            phase = INDUSTRIAL;
+                            setupBins();
+                            updateBackground();
+                            bgMusic.play();
+                        } else if (phase == INDUSTRIAL) {
+                            phase = MEGACENTER;
+                            setupBins();
+                            updateBackground();
+                            bgMusic.play();
+                        } else if (phase == MEGACENTER) {
+                            phase = BOSS;
+                            setupBins();
+                            updateBackground();
+                            inBossIntro = true; // Mostra introdução antes do boss
+                            bgMusic.play();
+                        } else if (phase == BOSS) {
+                            inStartScreen = true;
+                            resetGame();
+                            bgMusic.play();
                         }
                     }
                 }
-                // --- Evento para derrota: clique para voltar ao menu ---
-                if (inDefeatScreen && event.type == Event::MouseButtonPressed) {
-                    if (event.mouseButton.button == Mouse::Left) {
-                        inDefeatScreen = false;
-                        inStartScreen = true;
-                        resetGame();
-                        bgMusic.play();
-                    }
+                // --- Evento para derrota: toque para voltar ao menu ---
+                if (inDefeatScreen && event.type == Event::TouchBegan) {
+                    inDefeatScreen = false;
+                    inStartScreen = true;
+                    resetGame();
+                    bgMusic.play();
                 }
                 if (!inStartScreen && !inLevelTransition && !inDefeatScreen && 
-                    !inIntroStory && !inBossIntro && event.type == Event::MouseButtonPressed) {
-                    if (event.mouseButton.button == Mouse::Left) {
-                        Vector2f mousePos(event.mouseButton.x, event.mouseButton.y);
+                    !inIntroStory && !inBossIntro && event.type == Event::TouchBegan) {
+                    Vector2f touchPos(event.touch.x, event.touch.y);
 
-                        // Primeiro verifica power-ups
-                        handlePowerUpClick(mousePos);
+                    // Primeiro verifica power-ups
+                    handlePowerUpClick(touchPos);
 
-                        // Depois verifica lixos e lixeiras
-                        handleClick(mousePos);
-                    }
+                    // Depois verifica lixos e lixeiras
+                    handleClick(touchPos);
                 }
             }
 
@@ -1484,14 +1507,13 @@ public:
 
             if (inStartScreen) {
                 bgSprite.setTexture(bgCommunity, true);
-                IntRect texRect = bgSprite.getTextureRect();
                 bgSprite.setScale(
-                    800.f / texRect.width,
-                    600.f / texRect.height
+                    static_cast<float>(MOBILE_RESOLUTION_X) / bgSprite.getLocalBounds().width,
+                    static_cast<float>(MOBILE_RESOLUTION_Y) / bgSprite.getLocalBounds().height
                 );
                 window.draw(bgSprite);
 
-                RectangleShape overlay(Vector2f(800, 600));
+                RectangleShape overlay(Vector2f(MOBILE_RESOLUTION_X, MOBILE_RESOLUTION_Y));
                 overlay.setFillColor(Color(0, 0, 0, 100));
                 window.draw(overlay);
 
@@ -1508,9 +1530,9 @@ public:
                 Text volumeText;
                 volumeText.setFont(font);
                 volumeText.setString("Volume");
-                volumeText.setCharacterSize(16);
+                volumeText.setCharacterSize(24);
                 volumeText.setFillColor(Color::White);
-                volumeText.setPosition(550, 10);
+                volumeText.setPosition(50, 10);
                 window.draw(volumeText);
                 
                 window.display();
@@ -1522,12 +1544,12 @@ public:
                 window.clear(Color(40, 40, 60));
                 
                 // Desenhar fundo temático
-                RectangleShape storyBg(Vector2f(800, 600));
+                RectangleShape storyBg(Vector2f(MOBILE_RESOLUTION_X, MOBILE_RESOLUTION_Y));
                 storyBg.setFillColor(Color(30, 50, 70));
                 window.draw(storyBg);
                 
                 // Painel para texto
-                storyPanel.setFillColor(Color(0, 0, 0, 200));
+                storyPanel.setFillColor(Color(0, 0, 0, 180));
                 window.draw(storyPanel);
                 
                 // Texto da história
@@ -1541,7 +1563,7 @@ public:
                     "dos caminhoes de coleta antes que poluam a cidade.\n\n"
                     "Cada acerto aumenta sua reputacao e pontos.\n"
                     "Erros ou residuos perdidos diminuem sua reputacao.\n\n"
-                    "Clique com o botão direito do mouse para comecar sua jornada!"
+                    "Toque para comecar sua jornada!"
                 );
                 window.draw(storyText);
                 
@@ -1554,12 +1576,12 @@ public:
                 window.clear(Color(70, 30, 30));
                 
                 // Desenhar fundo temático
-                RectangleShape storyBg(Vector2f(800, 600));
+                RectangleShape storyBg(Vector2f(MOBILE_RESOLUTION_X, MOBILE_RESOLUTION_Y));
                 storyBg.setFillColor(Color(60, 30, 40));
                 window.draw(storyBg);
                 
                 // Painel para texto
-                storyPanel.setFillColor(Color(0, 0, 0, 200));
+                storyPanel.setFillColor(Color(0, 0, 0, 180));
                 window.draw(storyPanel);
                 
                 // Texto da história do boss
@@ -1576,13 +1598,13 @@ public:
                     "- Acertos recuperam um pouco de vida\n"
                     "- A cada 5 acertos, aparece um power-up especial\n"
                     "  que pode causar dano direto ao boss\n\n\n"
-                    "Clique para comecar o combate final!"
+                    "Toque para comecar o combate final!"
                 );
                 window.draw(storyText);
                 
                 // Desenhar retrato do boss
-                bossPortrait.setPosition(650, 400);
-                bossPortrait.setScale(0.035f, 0.035f);
+                bossPortrait.setPosition(MOBILE_RESOLUTION_X - 100, MOBILE_RESOLUTION_Y * 0.6f);
+                bossPortrait.setScale(0.05f, 0.05f);
                 window.draw(bossPortrait);
                 
                 window.display();
@@ -1636,9 +1658,9 @@ public:
 
                 // Ajustar as posições para o canto direito
                 float rightMargin = 20.0f; // 20 pixels da borda direita
-                scoreText.setPosition(800 - scoreBounds.width - rightMargin, 40);
-                comboText.setPosition(800 - comboBounds.width - rightMargin, 80);
-                phaseText.setPosition(800 - phaseBounds.width - rightMargin, 120);
+                scoreText.setPosition(MOBILE_RESOLUTION_X - scoreBounds.width - rightMargin, 40);
+                comboText.setPosition(MOBILE_RESOLUTION_X - comboBounds.width - rightMargin, 90);
+                phaseText.setPosition(MOBILE_RESOLUTION_X - phaseBounds.width - rightMargin, 140);
 
                 window.draw(scoreText);
                 window.draw(comboText);
